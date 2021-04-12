@@ -7,7 +7,9 @@ const CPU_OVERHEAT_THRESHOLD = Number(process.env.CPU_OVERHEAT_THRESHOLD) || 80;
 const JITSI_URL : string|undefined = (process.env.JITSI_URL === '') ? undefined : process.env.JITSI_URL;
 const JITSI_ISS = process.env.JITSI_ISS || '';
 const SECRET_JITSI_KEY = process.env.SECRET_JITSI_KEY || '';
+const HTTP_HOST = process.env.HTTP_HOST || '0.0.0.0';
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || '8080') || 8080;
+const GRPC_HOST = process.env.GRPC_HOST || '0.0.0.0';
 const GRPC_PORT = parseInt(process.env.GRPC_PORT || '50051') || 50051;
 export const SOCKET_IDLE_TIMER = parseInt(process.env.SOCKET_IDLE_TIMER as string) || 30; // maximum time (in second) without activity before a socket is closed
 export const TURN_STATIC_AUTH_SECRET = process.env.TURN_STATIC_AUTH_SECRET || '';
@@ -16,7 +18,9 @@ export {
     MINIMUM_DISTANCE,
     ADMIN_API_URL,
     ADMIN_API_TOKEN,
+    HTTP_HOST,
     HTTP_PORT,
+    GRPC_HOST,
     GRPC_PORT,
     GROUP_RADIUS,
     ALLOW_ARTILLERY,
