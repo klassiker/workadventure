@@ -4,11 +4,13 @@ const playerNameKey =           'playerName';
 const selectedPlayerKey =       'selectedPlayer';
 const customCursorPositionKey = 'customCursorPosition';
 const characterLayersKey =      'characterLayers';
+const companionKey =            'companion';
 const gameQualityKey =          'gameQuality';
 const videoQualityKey =         'videoQuality';
 const audioPlayerVolumeKey =    'audioVolume';
 const audioPlayerMuteKey =      'audioMute';
-const helpCameraSettingsShown =      'helpCameraSettingsShown';
+const helpCameraSettingsShown = 'helpCameraSettingsShown';
+const fullscreenKey =           'fullscreen';
 
 class LocalUserStore {
     saveUser(localUser: LocalUser) {
@@ -49,6 +51,22 @@ class LocalUserStore {
         return areCharacterLayersValid(value) ? value : null;
     }
 
+    setCompanion(companion: string|null): void {
+        return localStorage.setItem(companionKey, JSON.stringify(companion));
+    }
+    getCompanion(): string|null {
+        const companion = JSON.parse(localStorage.getItem(companionKey) || "null");
+
+        if (typeof companion !== "string" || companion === "") {
+            return null;
+        }
+
+        return companion;
+    }
+    wasCompanionSet(): boolean {
+        return localStorage.getItem(companionKey) ? true : false;
+    }
+
     setGameQualityValue(value: number): void {
         localStorage.setItem(gameQualityKey, '' + value);
     }
@@ -82,6 +100,13 @@ class LocalUserStore {
     }
     getHelpCameraSettingsShown(): boolean {
         return localStorage.getItem(helpCameraSettingsShown) === '1';
+    }
+
+    setFullscreen(value: boolean): void {
+        localStorage.setItem(fullscreenKey, value.toString());
+    }
+    getFullscreen(): boolean {
+        return localStorage.getItem(fullscreenKey) === 'true';
     }
 }
 

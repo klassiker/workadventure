@@ -2,10 +2,11 @@ import 'phaser';
 import GameConfig = Phaser.Types.Core.GameConfig;
 import "../dist/resources/style/index.scss";
 
-import {DEBUG_MODE, JITSI_URL, RESOLUTION} from "./Enum/EnvironmentVariable";
+import {DEBUG_MODE, RESOLUTION} from "./Enum/EnvironmentVariable";
 import {LoginScene} from "./Phaser/Login/LoginScene";
 import {ReconnectingScene} from "./Phaser/Reconnecting/ReconnectingScene";
 import {SelectCharacterScene} from "./Phaser/Login/SelectCharacterScene";
+import {SelectCompanionScene} from "./Phaser/Login/SelectCompanionScene";
 import {EnableCameraScene} from "./Phaser/Login/EnableCameraScene";
 import {CustomizeScene} from "./Phaser/Login/CustomizeScene";
 import {ResizableScene} from "./Phaser/Login/ResizableScene";
@@ -16,7 +17,6 @@ import {HelpCameraSettingsScene} from "./Phaser/Menu/HelpCameraSettingsScene";
 import {localUserStore} from "./Connexion/LocalUserStore";
 import {ErrorScene} from "./Phaser/Reconnecting/ErrorScene";
 import {iframeListener} from "./Api/IframeListener";
-import {discussionManager} from "./WebRtc/DiscussionManager";
 
 const {width, height} = coWebsiteManager.getGameSize();
 
@@ -33,7 +33,7 @@ const fps : Phaser.Types.Core.FPSConfig = {
     /**
      * Use setTimeout instead of requestAnimationFrame to run the game loop.
      */
-    forceSetTimeOut: true,
+    forceSetTimeOut: false,
     /**
      * Calculate the average frame delta from this many consecutive frame intervals.
      */
@@ -74,7 +74,7 @@ const config: GameConfig = {
     width: width / RESOLUTION,
     height: height / RESOLUTION,
     parent: "game",
-    scene: [EntryScene, LoginScene, SelectCharacterScene, EnableCameraScene, ReconnectingScene, ErrorScene, CustomizeScene, MenuScene, HelpCameraSettingsScene],
+    scene: [EntryScene, LoginScene, SelectCharacterScene, SelectCompanionScene, EnableCameraScene, ReconnectingScene, ErrorScene, CustomizeScene, MenuScene, HelpCameraSettingsScene],
     zoom: RESOLUTION,
     fps: fps,
     dom: {

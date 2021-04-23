@@ -4,13 +4,15 @@ import Image = Phaser.GameObjects.Image;
 import Rectangle = Phaser.GameObjects.Rectangle;
 import {EnableCameraSceneName} from "./EnableCameraScene";
 import {CustomizeSceneName} from "./CustomizeScene";
-import {ResizableScene} from "./ResizableScene";
 import {localUserStore} from "../../Connexion/LocalUserStore";
-import {loadAllDefaultModels, loadCustomTexture} from "../Entity/PlayerTexturesLoadingManager";
+import {loadAllDefaultModels} from "../Entity/PlayerTexturesLoadingManager";
 import {addLoader} from "../Components/Loader";
 import {BodyResourceDescriptionInterface} from "../Entity/PlayerTextures";
 import {AbstractCharacterScene} from "./AbstractCharacterScene";
 import {areCharacterLayersValid} from "../../Connexion/LocalUser";
+import {touchScreenManager} from "../../Touch/TouchScreenManager";
+import {PinchManager} from "../UserInput/PinchManager";
+import Zone = Phaser.GameObjects.Zone;
 
 
 //todo: put this constants in a dedicated file
@@ -36,6 +38,7 @@ export class SelectCharacterScene extends AbstractCharacterScene {
     private selectedRectangleYPos = 0; // Number of the character selected in the columns
     private selectedPlayer!: Phaser.Physics.Arcade.Sprite|null; // null if we are selecting the "customize" option
     private players: Array<Phaser.Physics.Arcade.Sprite> = new Array<Phaser.Physics.Arcade.Sprite>();
+    private mobileTapZone!: Zone;
     private playerModels!: BodyResourceDescriptionInterface[];
 
     constructor() {
@@ -65,12 +68,20 @@ export class SelectCharacterScene extends AbstractCharacterScene {
     }
 
     create() {
+        if (touchScreenManager.supportTouchScreen) {
+            new PinchManager(this);
+        }
         this.textField = new TextField(this, this.game.renderer.width / 2, 50, 'Select your character');
         this.pressReturnField = new TextField(
             this,
             this.game.renderer.width / 2,
-            90 + 32 * Math.ceil( this.playerModels.length / this.nbCharactersPerRow) + 40,
-            'Press enter to start');
+            90 + 32 * Math.ceil( this.playerModels.length / this.nbCharactersPerRow) + 60,
+            'Touch here\n\n or \n\nPress enter to start');
+        // For mobile purposes - we need a big enough touchable area.
+        this.mobileTapZone = this.add.zone(this.game.renderer.width / 2, 275, this.game.renderer.width / 2, 50)
+          .setInteractive().on("pointerdown", () => {
+            this.nextScene();
+          });
 
         const rectangleXStart = this.game.renderer.width / 2 - (this.nbCharactersPerRow / 2) * 32 + 16;
 
@@ -193,6 +204,10 @@ export class SelectCharacterScene extends AbstractCharacterScene {
         this.customizeButton.setInteractive().on("pointerdown", () => {
             this.selectedRectangleYPos = Math.ceil(this.playerModels.length / this.nbCharactersPerRow);
             this.updateSelectedPlayer();
+            this.nextScene();
+        });
+        this.customizeButtonSelected.setInteractive().on("pointerdown", () => {
+            this.nextScene();
         });
 
         this.selectedPlayer = this.players[0];
