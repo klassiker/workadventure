@@ -5,6 +5,7 @@ import {UserInputChatEvent} from "./Events/UserInputChatEvent";
 import * as crypto from "crypto";
 import {HtmlUtils} from "../WebRtc/HtmlUtils";
 import {EnterLeaveEvent} from "./Events/EnterLeaveEvent";
+import {CustomEvent} from "./Events/CustomEvent";
 import {isOpenPopupEvent, OpenPopupEvent} from "./Events/OpenPopupEvent";
 import {isOpenTabEvent, OpenTabEvent} from "./Events/OpenTabEvent";
 import {ButtonClickedEvent} from "./Events/ButtonClickedEvent";
@@ -211,6 +212,15 @@ class IframeListener {
             'data': {
                 "name": name
             } as EnterLeaveEvent
+        });
+    }
+
+    sendCustomEvent(name: string) {
+        this.postMessage({
+            'type': 'customEvent',
+            'data': {
+                "name": name
+            } as CustomEvent
         });
     }
 

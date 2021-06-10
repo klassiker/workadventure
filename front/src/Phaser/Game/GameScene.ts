@@ -733,6 +733,31 @@ export class GameScene extends ResizableScene implements CenterListener {
                 }
             }
         });
+        this.gameMap.onPropertyChange('customEvent', (newValue, oldValue, allProps) => {
+            const remove = () => {
+                layoutManager.removeActionButton('customEvent', this.userInputManager);
+            }
+            if (newValue === undefined) {
+                remove();
+            }else{
+                const action = () => {
+                    iframeListener.sendCustomEvent(newValue.toString());
+                    remove();
+                }
+                const props = allProps.get('customTrigger');
+                if(props && props === ON_ACTION_TRIGGER_BUTTON) {
+                    let message = allProps.get('customTriggerMessage');
+                    if (message === undefined) {
+                        message = 'Press SPACE or touch here to trigger custom event';
+                    }
+                    layoutManager.addActionButton('customEvent', message.toString(), () => {
+                        action();
+                    }, this.userInputManager);
+                }else{
+                    action();
+                }
+            }
+        });
         this.gameMap.onPropertyChange('silent', (newValue, oldValue) => {
             if (newValue === undefined || newValue === false || newValue === '') {
                 this.connection?.setSilent(false);

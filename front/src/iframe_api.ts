@@ -3,6 +3,7 @@ import {isIframeEventWrapper} from "./Api/Events/IframeEvent";
 import {isUserInputChatEvent, UserInputChatEvent} from "./Api/Events/UserInputChatEvent";
 import {Subject} from "rxjs";
 import {EnterLeaveEvent, isEnterLeaveEvent} from "./Api/Events/EnterLeaveEvent";
+import {CustomEvent, isCustomEvent} from "./Api/Events/CustomEvent";
 import {OpenPopupEvent} from "./Api/Events/OpenPopupEvent";
 import {isButtonClickedEvent} from "./Api/Events/ButtonClickedEvent";
 import {ClosePopupEvent} from "./Api/Events/ClosePopupEvent";
@@ -215,6 +216,8 @@ window.addEventListener('message', message => {
             enterStreams.get(payloadData.name)?.next();
         } else if (payload.type === 'leaveEvent' && isEnterLeaveEvent(payloadData)) {
             leaveStreams.get(payloadData.name)?.next();
+        } else if (payload.type === 'customEvent' && isCustomEvent(payloadData)) {
+            enterStreams.get(payloadData.name)?.next();
         } else if (payload.type === 'buttonClickedEvent' && isButtonClickedEvent(payloadData)) {
             const callback = popupCallbacks.get(payloadData.popupId)?.get(payloadData.buttonId);
             const popup = popups.get(payloadData.popupId);
