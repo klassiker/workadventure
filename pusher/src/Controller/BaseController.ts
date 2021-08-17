@@ -1,5 +1,4 @@
-import {HttpResponse} from "uWebSockets.js";
-
+import { HttpResponse } from "uWebSockets.js";
 
 export class BaseController {
     protected addCorsHeaders(res: HttpResponse): void {
@@ -16,23 +15,28 @@ export class BaseController {
         if (e && e.message) {
             let url = e?.config?.url;
             if (url !== undefined) {
-                url = ' for URL: '+url;
+                url = " for URL: " + url;
             } else {
-                url = '';
+                url = "";
             }
-            console.error('ERROR: '+e.message+url);
-        } else if (typeof(e) === 'string') {
+            console.error("ERROR: " + e.message + url);
+        } else if (typeof e === "string") {
             console.error(e);
         }
         if (e.stack) {
             console.error(e.stack);
         }
         if (e.response) {
-            res.writeStatus(e.response.status+" "+e.response.statusText);
+            res.writeStatus(e.response.status + " " + e.response.statusText);
             this.addCorsHeaders(res);
-            res.end("An error occurred: "+e.response.status+" "+e.response.statusText);
+            res.end(
+                "An error occurred: " +
+                    e.response.status +
+                    " " +
+                    (e.response.data && e.response.data.message ? e.response.data.message : e.response.statusText)
+            );
         } else {
-            res.writeStatus("500 Internal Server Error")
+            res.writeStatus("500 Internal Server Error");
             this.addCorsHeaders(res);
             res.end("An error occurred");
         }

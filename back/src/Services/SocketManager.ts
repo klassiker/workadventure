@@ -1,4 +1,4 @@
-import {GameRoom} from "../Model/GameRoom";
+import { GameRoom } from "../Model/GameRoom";
 import {
     ItemEventMessage,
     ItemStateMessage,
@@ -26,45 +26,51 @@ import {
     GroupLeftZoneMessage,
     WorldFullWarningMessage,
     UserLeftZoneMessage,
-    BanUserMessage, RefreshRoomMessage,
+    EmoteEventMessage,
+    BanUserMessage,
+    RefreshRoomMessage,
+    EmotePromptMessage,
+    VariableMessage,
+    BatchToPusherRoomMessage,
+    SubToPusherRoomMessage,
 } from "../Messages/generated/messages_pb";
-import {User, UserSocket} from "../Model/User";
-import {ProtobufUtils} from "../Model/Websocket/ProtobufUtils";
-import {Group} from "../Model/Group";
-import {cpuTracker} from "./CpuTracker";
+import { User, UserSocket } from "../Model/User";
+import { ProtobufUtils } from "../Model/Websocket/ProtobufUtils";
+import { Group } from "../Model/Group";
+import { cpuTracker } from "./CpuTracker";
 import {
     GROUP_RADIUS,
     JITSI_ISS,
     MINIMUM_DISTANCE,
     SECRET_JITSI_KEY,
-    TURN_STATIC_AUTH_SECRET
+    TURN_STATIC_AUTH_SECRET,
 } from "../Enum/EnvironmentVariable";
-import {Movable} from "../Model/Movable";
-import {PositionInterface} from "../Model/PositionInterface";
+import { Movable } from "../Model/Movable";
+import { PositionInterface } from "../Model/PositionInterface";
 import Jwt from "jsonwebtoken";
-import {JITSI_URL} from "../Enum/EnvironmentVariable";
-import {clientEventsEmitter} from "./ClientEventsEmitter";
-import {gaugeManager} from "./GaugeManager";
-import {ZoneSocket} from "../RoomManager";
-import {Zone} from "_Model/Zone";
+import { JITSI_URL } from "../Enum/EnvironmentVariable";
+import { clientEventsEmitter } from "./ClientEventsEmitter";
+import { gaugeManager } from "./GaugeManager";
+import { RoomSocket, ZoneSocket } from "../RoomManager";
+import { Zone } from "_Model/Zone";
 import Debug from "debug";
-import {Admin} from "_Model/Admin";
+import { Admin } from "_Model/Admin";
 import crypto from "crypto";
 
-
-const debug = Debug('sockermanager');
+const debug = Debug("sockermanager");
 
 function emitZoneMessage(subMessage: SubToPusherMessage, socket: ZoneSocket): void {
     // TODO: should we batch those every 100ms?
     const batchMessage = new BatchToPusherMessage();
     batchMessage.addPayload(subMessage);
-    
 
     socket.write(batchMessage);
 }
 
 export class SocketManager {
-    private rooms: Map<string, GameRoom> = new Map<string, GameRoom>();
+    //private rooms = new Map<string, GameRoom>();
+    // List of rooms in process of loading.
+    private roomsPromises = new Map<string, PromiseLike<GameRoom>>();
 
     constructor() {
         clientEventsEmitter.registerToClientJoin((clientUUid: string, roomId: string) => {
@@ -75,16 +81,18 @@ export class SocketManager {
         });
     }
 
-    public async handleJoinRoom(socket: UserSocket, joinRoomMessage: JoinRoomMessage): Promise<{ room: GameRoom; user: User }> {
-        
+    public async handleJoinRoom(
+        socket: UserSocket,
+        joinRoomMessage: JoinRoomMessage
+    ): Promise<{ room: GameRoom; user: User }> {
         //join new previous room
-        const {room, user} = await this.joinRoom(socket, joinRoomMessage);
-        
+        const { room, user } = await this.joinRoom(socket, joinRoomMessage);
+
         if (!socket.writable) {
-            console.warn('Socket was aborted');
+            console.warn("Socket was aborted");
             return {
                 room,
-                user
+                user,
             };
         }
         const roomJoinedMessage = new RoomJoinedMessage();
@@ -98,6 +106,16 @@ export class SocketManager {
             roomJoinedMessage.addItem(itemStateMessage);
         }
 
+        const variables = await room.getVariablesForTags(user.tags);
+
+        for (const [name, value] of variables.entries()) {
+            const variableMessage = new VariableMessage();
+            variableMessage.setName(name);
+            variableMessage.setValue(value);
+
+            roomJoinedMessage.addVariable(variableMessage);
+        }
+
         roomJoinedMessage.setCurrentuserid(user.id);
 
         const serverToClientMessage = new ServerToClientMessage();
@@ -106,37 +124,30 @@ export class SocketManager {
 
         return {
             room,
-            user
+            user,
         };
-
     }
 
     handleUserMovesMessage(room: GameRoom, user: User, userMovesMessage: UserMovesMessage) {
-        try {
-            const userMoves = userMovesMessage.toObject();
-            const position = userMovesMessage.getPosition();
+        const userMoves = userMovesMessage.toObject();
+        const position = userMovesMessage.getPosition();
 
-            // If CPU is high, let's drop messages of users moving (we will only dispatch the final position)
-            if (cpuTracker.isOverHeating() && userMoves.position?.moving === true) {
-                return;
-            }
-
-            if (position === undefined) {
-                throw new Error('Position not found in message');
-            }
-            const viewport = userMoves.viewport;
-            if (viewport === undefined) {
-                throw new Error('Viewport not found in message');
-            }
-            
-
-            // update position in the world
-            room.updatePosition(user, ProtobufUtils.toPointInterface(position));
-            //room.setViewport(client, client.viewport);
-        } catch (e) {
-            console.error('An error occurred on "user_position" event');
-            console.error(e);
+        // If CPU is high, let's drop messages of users moving (we will only dispatch the final position)
+        if (cpuTracker.isOverHeating() && userMoves.position?.moving === true) {
+            return;
         }
+
+        if (position === undefined) {
+            throw new Error("Position not found in message");
+        }
+        const viewport = userMoves.viewport;
+        if (viewport === undefined) {
+            throw new Error("Viewport not found in message");
+        }
+
+        // update position in the world
+        room.updatePosition(user, ProtobufUtils.toPointInterface(position));
+        //room.setViewport(client, client.viewport);
     }
 
     // Useless now, will be useful again if we allow editing details in game
@@ -155,39 +166,37 @@ export class SocketManager {
     }*/
 
     handleSilentMessage(room: GameRoom, user: User, silentMessage: SilentMessage) {
-        try {
-            room.setSilent(user, silentMessage.getSilent());
-        } catch (e) {
-            console.error('An error occurred on "handleSilentMessage"');
-            console.error(e);
-        }
+        room.setSilent(user, silentMessage.getSilent());
     }
 
     handleItemEvent(room: GameRoom, user: User, itemEventMessage: ItemEventMessage) {
         const itemEvent = ProtobufUtils.toItemEvent(itemEventMessage);
 
-        try {
-            const subMessage = new SubMessage();
-            subMessage.setItemeventmessage(itemEventMessage);
+        const subMessage = new SubMessage();
+        subMessage.setItemeventmessage(itemEventMessage);
 
-            // Let's send the event without using the SocketIO room.
-            // TODO: move this in the GameRoom class.
-            for (const user of room.getUsers().values()) {
-                user.emitInBatch(subMessage);
-            }
-
-            room.setItemState(itemEvent.itemId, itemEvent.state);
-        } catch (e) {
-            console.error('An error occurred on "item_event"');
-            console.error(e);
+        // Let's send the event without using the SocketIO room.
+        // TODO: move this in the GameRoom class.
+        for (const user of room.getUsers().values()) {
+            user.emitInBatch(subMessage);
         }
+
+        room.setItemState(itemEvent.itemId, itemEvent.state);
+    }
+
+    handleVariableEvent(room: GameRoom, user: User, variableMessage: VariableMessage): Promise<void> {
+        return room.setVariable(variableMessage.getName(), variableMessage.getValue(), user);
     }
 
     emitVideo(room: GameRoom, user: User, data: WebRtcSignalToServerMessage): void {
         //send only at user
         const remoteUser = room.getUsers().get(data.getReceiverid());
         if (remoteUser === undefined) {
-            console.warn("While exchanging a WebRTC signal: client with id ", data.getReceiverid(), " does not exist. This might be a race condition.");
+            console.warn(
+                "While exchanging a WebRTC signal: client with id ",
+                data.getReceiverid(),
+                " does not exist. This might be a race condition."
+            );
             return;
         }
 
@@ -195,8 +204,8 @@ export class SocketManager {
         webrtcSignalToClient.setUserid(user.id);
         webrtcSignalToClient.setSignal(data.getSignal());
         // TODO: only compute credentials if data.signal.type === "offer"
-        if (TURN_STATIC_AUTH_SECRET !== '') {
-            const {username, password} = this.getTURNCredentials(''+user.id, TURN_STATIC_AUTH_SECRET);
+        if (TURN_STATIC_AUTH_SECRET !== "") {
+            const { username, password } = this.getTURNCredentials("" + user.id, TURN_STATIC_AUTH_SECRET);
             webrtcSignalToClient.setWebrtcusername(username);
             webrtcSignalToClient.setWebrtcpassword(password);
         }
@@ -205,7 +214,7 @@ export class SocketManager {
         serverToClientMessage.setWebrtcsignaltoclientmessage(webrtcSignalToClient);
 
         //if (!client.disconnecting) {
-            remoteUser.socket.write(serverToClientMessage);
+        remoteUser.socket.write(serverToClientMessage);
         //}
     }
 
@@ -213,7 +222,11 @@ export class SocketManager {
         //send only at user
         const remoteUser = room.getUsers().get(data.getReceiverid());
         if (remoteUser === undefined) {
-            console.warn("While exchanging a WEBRTC_SCREEN_SHARING signal: client with id ", data.getReceiverid(), " does not exist. This might be a race condition.");
+            console.warn(
+                "While exchanging a WEBRTC_SCREEN_SHARING signal: client with id ",
+                data.getReceiverid(),
+                " does not exist. This might be a race condition."
+            );
             return;
         }
 
@@ -221,8 +234,8 @@ export class SocketManager {
         webrtcSignalToClient.setUserid(user.id);
         webrtcSignalToClient.setSignal(data.getSignal());
         // TODO: only compute credentials if data.signal.type === "offer"
-        if (TURN_STATIC_AUTH_SECRET !== '') {
-            const {username, password} = this.getTURNCredentials(''+user.id, TURN_STATIC_AUTH_SECRET);
+        if (TURN_STATIC_AUTH_SECRET !== "") {
+            const { username, password } = this.getTURNCredentials("" + user.id, TURN_STATIC_AUTH_SECRET);
             webrtcSignalToClient.setWebrtcusername(username);
             webrtcSignalToClient.setWebrtcpassword(password);
         }
@@ -231,48 +244,62 @@ export class SocketManager {
         serverToClientMessage.setWebrtcscreensharingsignaltoclientmessage(webrtcSignalToClient);
 
         //if (!client.disconnecting) {
-            remoteUser.socket.write(serverToClientMessage);
+        remoteUser.socket.write(serverToClientMessage);
         //}
     }
 
-    leaveRoom(room: GameRoom, user: User){
+    leaveRoom(room: GameRoom, user: User) {
         // leave previous room and world
         try {
             //user leave previous world
             room.leave(user);
             if (room.isEmpty()) {
-                this.rooms.delete(room.roomId);
+                this.roomsPromises.delete(room.roomUrl);
                 gaugeManager.decNbRoomGauge();
-                debug('Room is empty. Deleting room "%s"', room.roomId);
+                debug('Room is empty. Deleting room "%s"', room.roomUrl);
             }
         } finally {
-            clientEventsEmitter.emitClientLeave(user.uuid, room.roomId);
-            console.log('A user left');
+            clientEventsEmitter.emitClientLeave(user.uuid, room.roomUrl);
+            console.log("A user left");
         }
     }
 
     async getOrCreateRoom(roomId: string): Promise<GameRoom> {
-        //check and create new world for a room
-        let world = this.rooms.get(roomId)
-        if(world === undefined){
-            world = new GameRoom(
+        //check and create new room
+        let roomPromise = this.roomsPromises.get(roomId);
+        if (roomPromise === undefined) {
+            roomPromise = GameRoom.create(
                 roomId,
                 (user: User, group: Group) => this.joinWebRtcRoom(user, group),
                 (user: User, group: Group) => this.disConnectedUser(user, group),
                 MINIMUM_DISTANCE,
                 GROUP_RADIUS,
-                (thing: Movable, fromZone: Zone|null, listener: ZoneSocket) => this.onZoneEnter(thing, fromZone, listener),
-                (thing: Movable, position:PositionInterface, listener: ZoneSocket) => this.onClientMove(thing, position, listener),
-                (thing: Movable, newZone: Zone|null, listener: ZoneSocket) => this.onClientLeave(thing, newZone, listener)
-            );
-            gaugeManager.incNbRoomGauge();
-            this.rooms.set(roomId, world);
+                (thing: Movable, fromZone: Zone | null, listener: ZoneSocket) =>
+                    this.onZoneEnter(thing, fromZone, listener),
+                (thing: Movable, position: PositionInterface, listener: ZoneSocket) =>
+                    this.onClientMove(thing, position, listener),
+                (thing: Movable, newZone: Zone | null, listener: ZoneSocket) =>
+                    this.onClientLeave(thing, newZone, listener),
+                (emoteEventMessage: EmoteEventMessage, listener: ZoneSocket) =>
+                    this.onEmote(emoteEventMessage, listener)
+            )
+                .then((gameRoom) => {
+                    gaugeManager.incNbRoomGauge();
+                    return gameRoom;
+                })
+                .catch((e) => {
+                    this.roomsPromises.delete(roomId);
+                    throw e;
+                });
+            this.roomsPromises.set(roomId, roomPromise);
         }
-        return Promise.resolve(world)
+        return roomPromise;
     }
 
-    private async joinRoom(socket: UserSocket, joinRoomMessage: JoinRoomMessage): Promise<{ room: GameRoom; user: User }> {
-
+    private async joinRoom(
+        socket: UserSocket,
+        joinRoomMessage: JoinRoomMessage
+    ): Promise<{ room: GameRoom; user: User }> {
         const roomId = joinRoomMessage.getRoomid();
 
         const room = await socketManager.getOrCreateRoom(roomId);
@@ -281,21 +308,25 @@ export class SocketManager {
         const user = room.join(socket, joinRoomMessage);
 
         clientEventsEmitter.emitClientJoin(user.uuid, roomId);
-        console.log(new Date().toISOString() + ' A user joined');
-        return {room, user};
+        console.log(new Date().toISOString() + " A user joined");
+        return { room, user };
     }
 
-    private onZoneEnter(thing: Movable, fromZone: Zone|null, listener: ZoneSocket) {
+    private onZoneEnter(thing: Movable, fromZone: Zone | null, listener: ZoneSocket) {
         if (thing instanceof User) {
             const userJoinedZoneMessage = new UserJoinedZoneMessage();
             if (!Number.isInteger(thing.id)) {
-                throw new Error('clientUser.userId is not an integer '+thing.id);
+                throw new Error("clientUser.userId is not an integer " + thing.id);
             }
             userJoinedZoneMessage.setUserid(thing.id);
+            userJoinedZoneMessage.setUseruuid(thing.uuid);
             userJoinedZoneMessage.setName(thing.name);
             userJoinedZoneMessage.setCharacterlayersList(ProtobufUtils.toCharacterLayerMessages(thing.characterLayers));
             userJoinedZoneMessage.setPosition(ProtobufUtils.toPositionMessage(thing.getPosition()));
             userJoinedZoneMessage.setFromzone(this.toProtoZone(fromZone));
+            if (thing.visitCardUrl) {
+                userJoinedZoneMessage.setVisitcardurl(thing.visitCardUrl);
+            }
             userJoinedZoneMessage.setCompanion(thing.companion);
 
             const subMessage = new SubToPusherMessage();
@@ -306,11 +337,11 @@ export class SocketManager {
         } else if (thing instanceof Group) {
             this.emitCreateUpdateGroupEvent(listener, fromZone, thing);
         } else {
-            console.error('Unexpected type for Movable.');
+            console.error("Unexpected type for Movable.");
         }
     }
 
-    private onClientMove(thing: Movable, position:PositionInterface, listener: ZoneSocket): void {
+    private onClientMove(thing: Movable, position: PositionInterface, listener: ZoneSocket): void {
         if (thing instanceof User) {
             const userMovedMessage = new UserMovedMessage();
             userMovedMessage.setUserid(thing.id);
@@ -325,21 +356,28 @@ export class SocketManager {
         } else if (thing instanceof Group) {
             this.emitCreateUpdateGroupEvent(listener, null, thing);
         } else {
-            console.error('Unexpected type for Movable.');
+            console.error("Unexpected type for Movable.");
         }
     }
 
-    private onClientLeave(thing: Movable, newZone: Zone|null, listener: ZoneSocket) {
+    private onClientLeave(thing: Movable, newZone: Zone | null, listener: ZoneSocket) {
         if (thing instanceof User) {
             this.emitUserLeftEvent(listener, thing.id, newZone);
         } else if (thing instanceof Group) {
             this.emitDeleteGroupEvent(listener, thing.getId(), newZone);
         } else {
-            console.error('Unexpected type for Movable.');
+            console.error("Unexpected type for Movable.");
         }
     }
 
-    private emitCreateUpdateGroupEvent(client: ZoneSocket, fromZone: Zone|null, group: Group): void {
+    private onEmote(emoteEventMessage: EmoteEventMessage, client: ZoneSocket) {
+        const subMessage = new SubToPusherMessage();
+        subMessage.setEmoteeventmessage(emoteEventMessage);
+
+        emitZoneMessage(subMessage, client);
+    }
+
+    private emitCreateUpdateGroupEvent(client: ZoneSocket, fromZone: Zone | null, group: Group): void {
         const position = group.getPosition();
         const pointMessage = new PointMessage();
         pointMessage.setX(Math.floor(position.x));
@@ -357,7 +395,7 @@ export class SocketManager {
         //client.emitInBatch(subMessage);
     }
 
-    private emitDeleteGroupEvent(client: ZoneSocket, groupId: number, newZone: Zone|null): void {
+    private emitDeleteGroupEvent(client: ZoneSocket, groupId: number, newZone: Zone | null): void {
         const groupDeleteMessage = new GroupLeftZoneMessage();
         groupDeleteMessage.setGroupid(groupId);
         groupDeleteMessage.setTozone(this.toProtoZone(newZone));
@@ -369,7 +407,7 @@ export class SocketManager {
         //user.emitInBatch(subMessage);
     }
 
-    private emitUserLeftEvent(client: ZoneSocket, userId: number, newZone: Zone|null): void {
+    private emitUserLeftEvent(client: ZoneSocket, userId: number, newZone: Zone | null): void {
         const userLeftMessage = new UserLeftZoneMessage();
         userLeftMessage.setUserid(userId);
         userLeftMessage.setTozone(this.toProtoZone(newZone));
@@ -380,7 +418,7 @@ export class SocketManager {
         emitZoneMessage(subMessage, client);
     }
 
-    private toProtoZone(zone: Zone|null): ProtoZone|undefined {
+    private toProtoZone(zone: Zone | null): ProtoZone | undefined {
         if (zone !== null) {
             const zoneMessage = new ProtoZone();
             zoneMessage.setX(zone.x);
@@ -391,7 +429,6 @@ export class SocketManager {
     }
 
     private joinWebRtcRoom(user: User, group: Group) {
-
         for (const otherUser of group.getUsers()) {
             if (user === otherUser) {
                 continue;
@@ -400,10 +437,9 @@ export class SocketManager {
             // Let's send 2 messages: one to the user joining the group and one to the other user
             const webrtcStartMessage1 = new WebRtcStartMessage();
             webrtcStartMessage1.setUserid(otherUser.id);
-            webrtcStartMessage1.setName(otherUser.name);
             webrtcStartMessage1.setInitiator(true);
-            if (TURN_STATIC_AUTH_SECRET !== '') {
-                const {username, password} = this.getTURNCredentials(''+otherUser.id, TURN_STATIC_AUTH_SECRET);
+            if (TURN_STATIC_AUTH_SECRET !== "") {
+                const { username, password } = this.getTURNCredentials("" + otherUser.id, TURN_STATIC_AUTH_SECRET);
                 webrtcStartMessage1.setWebrtcusername(username);
                 webrtcStartMessage1.setWebrtcpassword(password);
             }
@@ -411,17 +447,13 @@ export class SocketManager {
             const serverToClientMessage1 = new ServerToClientMessage();
             serverToClientMessage1.setWebrtcstartmessage(webrtcStartMessage1);
 
-            //if (!user.socket.disconnecting) {
-                user.socket.write(serverToClientMessage1);
-                //console.log('Sending webrtcstart initiator to '+user.socket.userId)
-            //}
+            user.socket.write(serverToClientMessage1);
 
             const webrtcStartMessage2 = new WebRtcStartMessage();
             webrtcStartMessage2.setUserid(user.id);
-            webrtcStartMessage2.setName(user.name);
             webrtcStartMessage2.setInitiator(false);
-            if (TURN_STATIC_AUTH_SECRET !== '') {
-                const {username, password} = this.getTURNCredentials(''+user.id, TURN_STATIC_AUTH_SECRET);
+            if (TURN_STATIC_AUTH_SECRET !== "") {
+                const { username, password } = this.getTURNCredentials("" + user.id, TURN_STATIC_AUTH_SECRET);
                 webrtcStartMessage2.setWebrtcusername(username);
                 webrtcStartMessage2.setWebrtcpassword(password);
             }
@@ -429,11 +461,7 @@ export class SocketManager {
             const serverToClientMessage2 = new ServerToClientMessage();
             serverToClientMessage2.setWebrtcstartmessage(webrtcStartMessage2);
 
-            //if (!otherUser.socket.disconnecting) {
-                otherUser.socket.write(serverToClientMessage2);
-                //console.log('Sending webrtcstart to '+otherUser.socket.userId)
-            //}
-
+            otherUser.socket.write(serverToClientMessage2);
         }
     }
 
@@ -442,17 +470,17 @@ export class SocketManager {
      * and the Coturn server.
      * The Coturn server should be initialized with parameters: `--use-auth-secret --static-auth-secret=MySecretKey`
      */
-    private getTURNCredentials(name: string, secret: string): {username: string, password: string} {
-        const unixTimeStamp = Math.floor(Date.now()/1000) + 4*3600;   // this credential would be valid for the next 4 hours
-        const username = [unixTimeStamp, name].join(':');
-        const hmac = crypto.createHmac('sha1', secret);
-        hmac.setEncoding('base64');
+    private getTURNCredentials(name: string, secret: string): { username: string; password: string } {
+        const unixTimeStamp = Math.floor(Date.now() / 1000) + 4 * 3600; // this credential would be valid for the next 4 hours
+        const username = [unixTimeStamp, name].join(":");
+        const hmac = crypto.createHmac("sha1", secret);
+        hmac.setEncoding("base64");
         hmac.write(username);
         hmac.end();
         const password = hmac.read();
         return {
             username: username,
-            password: password
+            password: password,
         };
     }
 
@@ -475,9 +503,8 @@ export class SocketManager {
             serverToClientMessage1.setWebrtcdisconnectmessage(webrtcDisconnectMessage1);
 
             //if (!otherUser.socket.disconnecting) {
-                otherUser.socket.write(serverToClientMessage1);
+            otherUser.socket.write(serverToClientMessage1);
             //}
-
 
             const webrtcDisconnectMessage2 = new WebRtcDisconnectMessage();
             webrtcDisconnectMessage2.setUserid(otherUser.id);
@@ -486,57 +513,53 @@ export class SocketManager {
             serverToClientMessage2.setWebrtcdisconnectmessage(webrtcDisconnectMessage2);
 
             //if (!user.socket.disconnecting) {
-                user.socket.write(serverToClientMessage2);
+            user.socket.write(serverToClientMessage2);
             //}
         }
     }
 
     emitPlayGlobalMessage(room: GameRoom, playGlobalMessage: PlayGlobalMessage) {
-        try {
-            const serverToClientMessage = new ServerToClientMessage();
-            serverToClientMessage.setPlayglobalmessage(playGlobalMessage);
+        const serverToClientMessage = new ServerToClientMessage();
+        serverToClientMessage.setPlayglobalmessage(playGlobalMessage);
 
-            for (const [id, user] of room.getUsers().entries()) {
-                user.socket.write(serverToClientMessage);
-            }
-        } catch (e) {
-            console.error('An error occurred on "emitPlayGlobalMessage" event');
-            console.error(e);
+        for (const [id, user] of room.getUsers().entries()) {
+            user.socket.write(serverToClientMessage);
         }
-
     }
 
-    public getWorlds(): Map<string, GameRoom> {
-        return this.rooms;
+    public getWorlds(): Map<string, PromiseLike<GameRoom>> {
+        return this.roomsPromises;
     }
-
 
     public handleQueryJitsiJwtMessage(user: User, queryJitsiJwtMessage: QueryJitsiJwtMessage) {
         const room = queryJitsiJwtMessage.getJitsiroom();
         const tag = queryJitsiJwtMessage.getTag(); // FIXME: this is not secure. We should load the JSON for the current room and check rights associated to room instead.
 
-        if (SECRET_JITSI_KEY === '') {
-            throw new Error('You must set the SECRET_JITSI_KEY key to the secret to generate JWT tokens for Jitsi.');
+        if (SECRET_JITSI_KEY === "") {
+            throw new Error("You must set the SECRET_JITSI_KEY key to the secret to generate JWT tokens for Jitsi.");
         }
 
         // Let's see if the current client has
         const isAdmin = user.tags.includes(tag);
 
-        const jwt = Jwt.sign({
-            "aud": "jitsi",
-            "iss": JITSI_ISS,
-            "sub": JITSI_URL,
-            "room": room,
-            "moderator": isAdmin
-        }, SECRET_JITSI_KEY, {
-            expiresIn: '1d',
-            algorithm: "HS256",
-            header:
-                {
-                    "alg": "HS256",
-                    "typ": "JWT"
-                }
-        });
+        const jwt = Jwt.sign(
+            {
+                aud: "jitsi",
+                iss: JITSI_ISS,
+                sub: JITSI_URL,
+                room: room,
+                moderator: isAdmin,
+            },
+            SECRET_JITSI_KEY,
+            {
+                expiresIn: "1d",
+                algorithm: "HS256",
+                header: {
+                    alg: "HS256",
+                    typ: "JWT",
+                },
+            }
+        );
 
         const sendJitsiJwtMessage = new SendJitsiJwtMessage();
         sendJitsiJwtMessage.setJitsiroom(room);
@@ -548,7 +571,7 @@ export class SocketManager {
         user.socket.write(serverToClientMessage);
     }
 
-    public handlerSendUserMessage(user: User, sendUserMessageToSend: SendUserMessage){
+    public handlerSendUserMessage(user: User, sendUserMessageToSend: SendUserMessage) {
         const sendUserMessage = new SendUserMessage();
         sendUserMessage.setMessage(sendUserMessageToSend.getMessage());
         sendUserMessage.setType(sendUserMessageToSend.getType());
@@ -558,7 +581,7 @@ export class SocketManager {
         user.socket.write(serverToClientMessage);
     }
 
-    public handlerBanUserMessage(room: GameRoom, user: User, banUserMessageToSend: BanUserMessage){
+    public handlerBanUserMessage(room: GameRoom, user: User, banUserMessageToSend: BanUserMessage) {
         const banUserMessage = new BanUserMessage();
         banUserMessage.setMessage(banUserMessageToSend.getMessage());
         banUserMessage.setType(banUserMessageToSend.getType());
@@ -575,11 +598,10 @@ export class SocketManager {
         }, 10000);
     }
 
-    public addZoneListener(call: ZoneSocket, roomId: string, x: number, y: number): void {
-        const room = this.rooms.get(roomId);
+    public async addZoneListener(call: ZoneSocket, roomId: string, x: number, y: number): Promise<void> {
+        const room = await this.roomsPromises.get(roomId);
         if (!room) {
-            console.error("In addZoneListener, could not find room with id '" +  roomId + "'");
-            return;
+            throw new Error("In addZoneListener, could not find room with id '" + roomId + "'");
         }
 
         const things = room.addZoneListener(call, x, y);
@@ -590,9 +612,13 @@ export class SocketManager {
             if (thing instanceof User) {
                 const userJoinedMessage = new UserJoinedZoneMessage();
                 userJoinedMessage.setUserid(thing.id);
+                userJoinedMessage.setUseruuid(thing.uuid);
                 userJoinedMessage.setName(thing.name);
                 userJoinedMessage.setCharacterlayersList(ProtobufUtils.toCharacterLayerMessages(thing.characterLayers));
                 userJoinedMessage.setPosition(ProtobufUtils.toPositionMessage(thing.getPosition()));
+                if (thing.visitCardUrl) {
+                    userJoinedMessage.setVisitcardurl(thing.visitCardUrl);
+                }
                 userJoinedMessage.setCompanion(thing.companion);
 
                 const subMessage = new SubToPusherMessage();
@@ -616,14 +642,35 @@ export class SocketManager {
         call.write(batchMessage);
     }
 
-    removeZoneListener(call: ZoneSocket, roomId: string, x: number, y: number) {
-        const room = this.rooms.get(roomId);
+    async removeZoneListener(call: ZoneSocket, roomId: string, x: number, y: number): Promise<void> {
+        const room = await this.roomsPromises.get(roomId);
         if (!room) {
-            console.error("In removeZoneListener, could not find room with id '" +  roomId + "'");
-            return;
+            throw new Error("In removeZoneListener, could not find room with id '" + roomId + "'");
         }
 
         room.removeZoneListener(call, x, y);
+    }
+
+    async addRoomListener(call: RoomSocket, roomId: string) {
+        const room = await this.getOrCreateRoom(roomId);
+        if (!room) {
+            throw new Error("In addRoomListener, could not find room with id '" + roomId + "'");
+        }
+
+        room.addRoomListener(call);
+
+        const batchMessage = new BatchToPusherRoomMessage();
+
+        call.write(batchMessage);
+    }
+
+    async removeRoomListener(call: RoomSocket, roomId: string) {
+        const room = await this.roomsPromises.get(roomId);
+        if (!room) {
+            throw new Error("In removeRoomListener, could not find room with id '" + roomId + "'");
+        }
+
+        room.removeRoomListener(call);
     }
 
     public async handleJoinAdminRoom(admin: Admin, roomId: string): Promise<GameRoom> {
@@ -634,79 +681,102 @@ export class SocketManager {
         return room;
     }
 
-    public leaveAdminRoom(room: GameRoom, admin: Admin){
+    public leaveAdminRoom(room: GameRoom, admin: Admin) {
         room.adminLeave(admin);
         if (room.isEmpty()) {
-            this.rooms.delete(room.roomId);
+            this.roomsPromises.delete(room.roomUrl);
             gaugeManager.decNbRoomGauge();
-            debug('Room is empty. Deleting room "%s"', room.roomId);
+            debug('Room is empty. Deleting room "%s"', room.roomUrl);
         }
     }
 
-    public sendAdminMessage(roomId: string, recipientUuid: string, message: string): void {
-        const room = this.rooms.get(roomId);
+    public async sendAdminMessage(roomId: string, recipientUuid: string, message: string): Promise<void> {
+        const room = await this.roomsPromises.get(roomId);
         if (!room) {
-            console.error("In sendAdminMessage, could not find room with id '" + roomId + "'. Maybe the room was closed a few milliseconds ago and there was a race condition?");
+            console.error(
+                "In sendAdminMessage, could not find room with id '" +
+                    roomId +
+                    "'. Maybe the room was closed a few milliseconds ago and there was a race condition?"
+            );
             return;
         }
 
-        const recipient = room.getUserByUuid(recipientUuid);
-        if (recipient === undefined) {
-            console.error("In sendAdminMessage, could not find user with id '" + recipientUuid + "'. Maybe the user left the room a few milliseconds ago and there was a race condition?");
+        const recipients = room.getUsersByUuid(recipientUuid);
+        if (recipients.length === 0) {
+            console.error(
+                "In sendAdminMessage, could not find user with id '" +
+                    recipientUuid +
+                    "'. Maybe the user left the room a few milliseconds ago and there was a race condition?"
+            );
             return;
         }
 
-        const sendUserMessage = new SendUserMessage();
-        sendUserMessage.setMessage(message);
-        sendUserMessage.setType('ban'); //todo: is the type correct?
+        for (const recipient of recipients) {
+            const sendUserMessage = new SendUserMessage();
+            sendUserMessage.setMessage(message);
+            sendUserMessage.setType("ban"); //todo: is the type correct?
 
-        const serverToClientMessage = new ServerToClientMessage();
-        serverToClientMessage.setSendusermessage(sendUserMessage);
+            const serverToClientMessage = new ServerToClientMessage();
+            serverToClientMessage.setSendusermessage(sendUserMessage);
 
-        recipient.socket.write(serverToClientMessage);
+            recipient.socket.write(serverToClientMessage);
+        }
     }
 
-    public banUser(roomId: string, recipientUuid: string, message: string): void {
-        const room = this.rooms.get(roomId);
+    public async banUser(roomId: string, recipientUuid: string, message: string): Promise<void> {
+        const room = await this.roomsPromises.get(roomId);
         if (!room) {
-            console.error("In banUser, could not find room with id '" +  roomId + "'. Maybe the room was closed a few milliseconds ago and there was a race condition?");
+            console.error(
+                "In banUser, could not find room with id '" +
+                    roomId +
+                    "'. Maybe the room was closed a few milliseconds ago and there was a race condition?"
+            );
             return;
         }
 
-        const recipient = room.getUserByUuid(recipientUuid);
-        if (recipient === undefined) {
-            console.error("In banUser, could not find user with id '" + recipientUuid + "'. Maybe the user left the room a few milliseconds ago and there was a race condition?");
+        const recipients = room.getUsersByUuid(recipientUuid);
+        if (recipients.length === 0) {
+            console.error(
+                "In banUser, could not find user with id '" +
+                    recipientUuid +
+                    "'. Maybe the user left the room a few milliseconds ago and there was a race condition?"
+            );
             return;
         }
 
-        // Let's leave the room now.
-        room.leave(recipient);
+        for (const recipient of recipients) {
+            // Let's leave the room now.
+            room.leave(recipient);
 
-        const banUserMessage = new BanUserMessage();
-        banUserMessage.setMessage(message);
-        banUserMessage.setType('banned');
+            const banUserMessage = new BanUserMessage();
+            banUserMessage.setMessage(message);
+            banUserMessage.setType("banned");
 
-        const serverToClientMessage = new ServerToClientMessage();
-        serverToClientMessage.setBanusermessage(banUserMessage);
+            const serverToClientMessage = new ServerToClientMessage();
+            serverToClientMessage.setBanusermessage(banUserMessage);
 
-        // Let's close the connection when the user is banned.
-        recipient.socket.write(serverToClientMessage);
-        recipient.socket.end();
+            // Let's close the connection when the user is banned.
+            recipient.socket.write(serverToClientMessage);
+            recipient.socket.end();
+        }
     }
 
-
-    sendAdminRoomMessage(roomId: string, message: string) {
-        const room = this.rooms.get(roomId);
+    async sendAdminRoomMessage(roomId: string, message: string, type: string) {
+        const room = await this.roomsPromises.get(roomId);
         if (!room) {
             //todo: this should cause the http call to return a 500
-            console.error("In sendAdminRoomMessage, could not find room with id '" +  roomId + "'. Maybe the room was closed a few milliseconds ago and there was a race condition?");
+            console.error(
+                "In sendAdminRoomMessage, could not find room with id '" +
+                    roomId +
+                    "'. Maybe the room was closed a few milliseconds ago and there was a race condition?"
+            );
             return;
         }
 
         room.getUsers().forEach((recipient) => {
             const sendUserMessage = new SendUserMessage();
             sendUserMessage.setMessage(message);
-            sendUserMessage.setType('message');
+            sendUserMessage.setType(type);
 
             const clientMessage = new ServerToClientMessage();
             clientMessage.setSendusermessage(sendUserMessage);
@@ -715,14 +785,18 @@ export class SocketManager {
         });
     }
 
-    dispatchWorlFullWarning(roomId: string,): void {
-        const room = this.rooms.get(roomId);
+    async dispatchWorldFullWarning(roomId: string): Promise<void> {
+        const room = await this.roomsPromises.get(roomId);
         if (!room) {
             //todo: this should cause the http call to return a 500
-            console.error("In sendAdminRoomMessage, could not find room with id '" +  roomId + "'. Maybe the room was closed a few milliseconds ago and there was a race condition?");
+            console.error(
+                "In dispatchWorldFullWarning, could not find room with id '" +
+                    roomId +
+                    "'. Maybe the room was closed a few milliseconds ago and there was a race condition?"
+            );
             return;
         }
-        
+
         room.getUsers().forEach((recipient) => {
             const worldFullMessage = new WorldFullWarningMessage();
 
@@ -733,23 +807,30 @@ export class SocketManager {
         });
     }
 
-    dispatchRoomRefresh(roomId: string,): void {
-        const room = this.rooms.get(roomId);
+    async dispatchRoomRefresh(roomId: string): Promise<void> {
+        const room = await this.roomsPromises.get(roomId);
         if (!room) {
             return;
         }
-        
+
         const versionNumber = room.incrementVersion();
         room.getUsers().forEach((recipient) => {
             const worldFullMessage = new RefreshRoomMessage();
-            worldFullMessage.setRoomid(roomId)
-            worldFullMessage.setVersionnumber(versionNumber)
+            worldFullMessage.setRoomid(roomId);
+            worldFullMessage.setVersionnumber(versionNumber);
 
             const clientMessage = new ServerToClientMessage();
             clientMessage.setRefreshroommessage(worldFullMessage);
 
             recipient.socket.write(clientMessage);
         });
+    }
+
+    handleEmoteEventMessage(room: GameRoom, user: User, emotePromptMessage: EmotePromptMessage) {
+        const emoteEventMessage = new EmoteEventMessage();
+        emoteEventMessage.setEmote(emotePromptMessage.getEmote());
+        emoteEventMessage.setActoruserid(user.id);
+        room.emitEmoteEvent(user, emoteEventMessage);
     }
 }
 

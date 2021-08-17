@@ -4,6 +4,8 @@
  * Represents the interface for the Tiled exported data structure (JSON). Used
  * when loading resources via Resource loader.
  */
+import TilemapLayer = Phaser.Tilemaps.TilemapLayer;
+
 export interface ITiledMap {
     width: number;
     height: number;
@@ -14,7 +16,7 @@ export interface ITiledMap {
      * Map orientation (orthogonal)
      */
     orientation: string;
-    properties: ITiledMapLayerProperty[];
+    properties?: ITiledMapProperty[];
 
     /**
      * Render order (right-down)
@@ -24,12 +26,17 @@ export interface ITiledMap {
     tilewidth: number;
     tilesets: ITiledTileSet[];
     version: number;
+    compressionlevel?: number;
+    infinite?: boolean;
+    nextlayerid?: number;
+    tiledversion?: string;
+    type?: string;
 }
 
-export interface ITiledMapLayerProperty {
+export interface ITiledMapProperty {
     name: string;
     type: string;
-    value: string|boolean|number|undefined;
+    value: string | boolean | number | undefined;
 }
 
 /*export interface ITiledMapLayerBooleanProperty {
@@ -38,19 +45,35 @@ export interface ITiledMapLayerProperty {
     value: boolean
 }*/
 
-export interface ITiledMapLayer {
-    data: number[]|string;
+export type ITiledMapLayer = ITiledMapGroupLayer | ITiledMapObjectLayer | ITiledMapTileLayer;
+
+export interface ITiledMapGroupLayer {
+    id?: number;
+    name: string;
+    opacity: number;
+    properties?: ITiledMapProperty[];
+
+    type: "group";
+    visible: boolean;
+    x: number;
+    y: number;
+    /**
+     * Layers for group layer
+     */
+    layers: ITiledMapLayer[];
+}
+
+export interface ITiledMapTileLayer {
+    id?: number;
+    data: number[] | string;
     height: number;
     name: string;
     opacity: number;
-    properties: ITiledMapLayerProperty[];
-    encoding: string;
+    properties?: ITiledMapProperty[];
+    encoding?: string;
     compression?: string;
 
-    /**
-     * Type of layer (tilelayer, objectgroup)
-     */
-    type: string;
+    type: "tilelayer";
     visible: boolean;
     width: number;
     x: number;
@@ -59,7 +82,29 @@ export interface ITiledMapLayer {
     /**
      * Draw order (topdown (default), index)
      */
-    draworder: string;
+    draworder?: string;
+    phaserLayer?: TilemapLayer;
+}
+
+export interface ITiledMapObjectLayer {
+    id?: number;
+    height: number;
+    name: string;
+    opacity: number;
+    properties?: ITiledMapProperty[];
+    encoding?: string;
+    compression?: string;
+
+    type: "objectgroup";
+    visible: boolean;
+    width: number;
+    x: number;
+    y: number;
+
+    /**
+     * Draw order (topdown (default), index)
+     */
+    draworder?: string;
     objects: ITiledMapObject[];
 }
 
@@ -72,7 +117,7 @@ export interface ITiledMapObject {
     gid: number;
     height: number;
     name: string;
-    properties: {[key: string]: string};
+    properties?: ITiledMapProperty[];
     rotation: number;
     type: string;
     visible: boolean;
@@ -88,12 +133,27 @@ export interface ITiledMapObject {
     /**
      * Polygon points
      */
-    polygon: {x: number, y: number}[];
+    polygon: { x: number; y: number }[];
 
     /**
      * Polyline points
      */
-    polyline: {x: number, y: number}[];
+    polyline: { x: number; y: number }[];
+
+    text?: ITiledText;
+    template?: string;
+}
+
+export interface ITiledText {
+    text: string;
+    wrap?: boolean;
+    fontfamily?: string;
+    pixelsize?: number;
+    color?: string;
+    underline?: boolean;
+    italic?: boolean;
+    strikeout?: boolean;
+    halign?: "center" | "right" | "justify" | "left";
 }
 
 export interface ITiledTileSet {
@@ -104,19 +164,26 @@ export interface ITiledTileSet {
     imagewidth: number;
     margin: number;
     name: string;
-    properties: {[key: string]: string};
+    properties?: ITiledMapProperty[];
     spacing: number;
     tilecount: number;
     tileheight: number;
     tilewidth: number;
     transparentcolor: string;
     terrains: ITiledMapTerrain[];
-    tiles: {[key: string]: { terrain: number[] }};
+    tiles?: Array<ITile>;
 
     /**
      * Refers to external tileset file (should be JSON)
      */
     source: string;
+}
+
+export interface ITile {
+    id: number;
+    type?: string;
+
+    properties?: ITiledMapProperty[];
 }
 
 export interface ITiledMapTerrain {

@@ -1,27 +1,34 @@
-import 'phaser';
+import "phaser";
 import GameConfig = Phaser.Types.Core.GameConfig;
-import "../dist/resources/style/index.scss";
+import "../style/index.scss";
 
-import {DEBUG_MODE, RESOLUTION} from "./Enum/EnvironmentVariable";
-import {LoginScene} from "./Phaser/Login/LoginScene";
-import {ReconnectingScene} from "./Phaser/Reconnecting/ReconnectingScene";
-import {SelectCharacterScene} from "./Phaser/Login/SelectCharacterScene";
-import {SelectCompanionScene} from "./Phaser/Login/SelectCompanionScene";
-import {EnableCameraScene} from "./Phaser/Login/EnableCameraScene";
-import {CustomizeScene} from "./Phaser/Login/CustomizeScene";
-import {ResizableScene} from "./Phaser/Login/ResizableScene";
-import {EntryScene} from "./Phaser/Login/EntryScene";
-import {coWebsiteManager} from "./WebRtc/CoWebsiteManager";
-import {MenuScene} from "./Phaser/Menu/MenuScene";
-import {HelpCameraSettingsScene} from "./Phaser/Menu/HelpCameraSettingsScene";
-import {localUserStore} from "./Connexion/LocalUserStore";
-import {ErrorScene} from "./Phaser/Reconnecting/ErrorScene";
-import {iframeListener} from "./Api/IframeListener";
+import { DEBUG_MODE, isMobile } from "./Enum/EnvironmentVariable";
+import { LoginScene } from "./Phaser/Login/LoginScene";
+import { ReconnectingScene } from "./Phaser/Reconnecting/ReconnectingScene";
+import { SelectCharacterScene } from "./Phaser/Login/SelectCharacterScene";
+import { SelectCompanionScene } from "./Phaser/Login/SelectCompanionScene";
+import { EnableCameraScene } from "./Phaser/Login/EnableCameraScene";
+import { CustomizeScene } from "./Phaser/Login/CustomizeScene";
+import WebFontLoaderPlugin from "phaser3-rex-plugins/plugins/webfontloader-plugin.js";
+import OutlinePipelinePlugin from "phaser3-rex-plugins/plugins/outlinepipeline-plugin.js";
+import { EntryScene } from "./Phaser/Login/EntryScene";
+import { coWebsiteManager } from "./WebRtc/CoWebsiteManager";
+import { MenuScene } from "./Phaser/Menu/MenuScene";
+import { localUserStore } from "./Connexion/LocalUserStore";
+import { ErrorScene } from "./Phaser/Reconnecting/ErrorScene";
+import { iframeListener } from "./Api/IframeListener";
+import { SelectCharacterMobileScene } from "./Phaser/Login/SelectCharacterMobileScene";
+import { HdpiManager } from "./Phaser/Services/HdpiManager";
+import { waScaleManager } from "./Phaser/Services/WaScaleManager";
+import { Game } from "./Phaser/Game/Game";
+import App from "./Components/App.svelte";
+import { HtmlUtils } from "./WebRtc/HtmlUtils";
+import WebGLRenderer = Phaser.Renderer.WebGL.WebGLRenderer;
 
-const {width, height} = coWebsiteManager.getGameSize();
+const { width, height } = coWebsiteManager.getGameSize();
 
 const valueGameQuality = localUserStore.getGameQualityValue();
-const fps : Phaser.Types.Core.FPSConfig = {
+const fps: Phaser.Types.Core.FPSConfig = {
     /**
      * The minimum acceptable rendering rate, in frames per second.
      */
@@ -45,81 +52,113 @@ const fps : Phaser.Types.Core.FPSConfig = {
     /**
      * Apply delta smoothing during the game update to help avoid spikes?
      */
-    smoothStep: false
-}
+    smoothStep: false,
+};
 
 // the ?phaserMode=canvas parameter can be used to force Canvas usage
 const params = new URLSearchParams(document.location.search.substring(1));
 const phaserMode = params.get("phaserMode");
 let mode: number;
 switch (phaserMode) {
-    case 'auto':
+    case "auto":
     case null:
         mode = Phaser.AUTO;
         break;
-    case 'canvas':
+    case "canvas":
         mode = Phaser.CANVAS;
         break;
-    case 'webgl':
+    case "webgl":
         mode = Phaser.WEBGL;
         break;
     default:
         throw new Error('phaserMode parameter must be one of "auto", "canvas" or "webgl"');
 }
 
+const hdpiManager = new HdpiManager(640 * 480, 196 * 196);
+const { game: gameSize, real: realSize } = hdpiManager.getOptimalGameSize({ width, height });
 
 const config: GameConfig = {
     type: mode,
     title: "WorkAdventure",
-    width: width / RESOLUTION,
-    height: height / RESOLUTION,
-    parent: "game",
-    scene: [EntryScene, LoginScene, SelectCharacterScene, SelectCompanionScene, EnableCameraScene, ReconnectingScene, ErrorScene, CustomizeScene, MenuScene, HelpCameraSettingsScene],
-    zoom: RESOLUTION,
+    scale: {
+        parent: "game",
+        width: gameSize.width,
+        height: gameSize.height,
+        zoom: realSize.width / gameSize.width,
+        autoRound: true,
+        resizeInterval: 999999999999,
+    },
+    scene: [
+        EntryScene,
+        LoginScene,
+        isMobile() ? SelectCharacterMobileScene : SelectCharacterScene,
+        SelectCompanionScene,
+        EnableCameraScene,
+        ReconnectingScene,
+        ErrorScene,
+        CustomizeScene,
+        MenuScene,
+    ],
+    //resolution: window.devicePixelRatio / 2,
     fps: fps,
     dom: {
-        createContainer: true
+        createContainer: true,
     },
     render: {
         pixelArt: true,
         roundPixels: true,
-        antialias: false
+        antialias: false,
+    },
+    plugins: {
+        global: [
+            {
+                key: "rexWebFontLoader",
+                plugin: WebFontLoaderPlugin,
+                start: true,
+            },
+        ],
     },
     physics: {
         default: "arcade",
         arcade: {
             debug: DEBUG_MODE,
-        }
+        },
     },
+    // Instruct systems with 2 GPU to choose the low power one. We don't need that extra power and we want to save battery
+    powerPreference: "low-power",
     callbacks: {
-        postBoot: game => {
-            // Commented out to try to fix MacOS bug
-            /*const renderer = game.renderer;
+        postBoot: (game) => {
+            // Install rexOutlinePipeline only if the renderer is WebGL.
+            const renderer = game.renderer;
             if (renderer instanceof WebGLRenderer) {
-                renderer.pipelines.add(OutlinePipeline.KEY, new OutlinePipeline(game));
-            }*/
-        }
-    }
+                game.plugins.install("rexOutlinePipeline", OutlinePipelinePlugin, true);
+            }
+        },
+    },
 };
 
-const game = new Phaser.Game(config);
+//const game = new Phaser.Game(config);
+const game = new Game(config);
 
-window.addEventListener('resize', function (event) {
+waScaleManager.setGame(game);
+
+window.addEventListener("resize", function (event) {
     coWebsiteManager.resetStyle();
-    const {width, height} = coWebsiteManager.getGameSize();
-    game.scale.resize(width / RESOLUTION, height / RESOLUTION);
 
-    // Let's trigger the onResize method of any active scene that is a ResizableScene
-    for (const scene of game.scene.getScenes(true)) {
-        if (scene instanceof ResizableScene) {
-            scene.onResize(event);
-        }
-    }
+    waScaleManager.applyNewSize();
 });
 
 coWebsiteManager.onResize.subscribe(() => {
-    const {width, height} = coWebsiteManager.getGameSize();
-    game.scale.resize(width / RESOLUTION, height / RESOLUTION);
+    waScaleManager.applyNewSize();
 });
 
 iframeListener.init();
+
+const app = new App({
+    target: HtmlUtils.getElementByIdOrFail("svelte-overlay"),
+    props: {
+        game: game,
+    },
+});
+
+export default app;

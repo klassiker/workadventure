@@ -1,30 +1,26 @@
-import {GameScene} from "./GameScene";
-import {connectionManager} from "../../Connexion/ConnectionManager";
-import {Room} from "../../Connexion/Room";
-import {MenuScene, MenuSceneName} from "../Menu/MenuScene";
-import {HelpCameraSettingsScene, HelpCameraSettingsSceneName} from "../Menu/HelpCameraSettingsScene";
-import {LoginSceneName} from "../Login/LoginScene";
-import {SelectCharacterSceneName} from "../Login/SelectCharacterScene";
-import {EnableCameraSceneName} from "../Login/EnableCameraScene";
-import {localUserStore} from "../../Connexion/LocalUserStore";
-
-export interface HasMovedEvent {
-    direction: string;
-    moving: boolean;
-    x: number;
-    y: number;
-}
+import { GameScene } from "./GameScene";
+import { connectionManager } from "../../Connexion/ConnectionManager";
+import type { Room } from "../../Connexion/Room";
+import { MenuScene, MenuSceneName } from "../Menu/MenuScene";
+import { LoginSceneName } from "../Login/LoginScene";
+import { SelectCharacterSceneName } from "../Login/SelectCharacterScene";
+import { EnableCameraSceneName } from "../Login/EnableCameraScene";
+import { localUserStore } from "../../Connexion/LocalUserStore";
+import { get } from "svelte/store";
+import { requestedCameraState, requestedMicrophoneState } from "../../Stores/MediaStore";
+import { helpCameraSettingsVisibleStore } from "../../Stores/HelpCameraSettingsStore";
 
 /**
  * This class should be responsible for any scene starting/stopping
  */
 export class GameManager {
-    private playerName: string|null;
-    private characterLayers: string[]|null;
-    private companion: string|null;
-    private startRoom!:Room;
-    currentGameSceneName: string|null = null;
-    
+    private playerName: string | null;
+    private characterLayers: string[] | null;
+    private companion: string | null;
+    private startRoom!: Room;
+    private scenePlugin!: Phaser.Scenes.ScenePlugin;
+    currentGameSceneName: string | null = null;
+
     constructor() {
         this.playerName = localUserStore.getName();
         this.characterLayers = localUserStore.getCharacterLayers();
@@ -32,8 +28,9 @@ export class GameManager {
     }
 
     public async init(scenePlugin: Phaser.Scenes.ScenePlugin): Promise<string> {
+        this.scenePlugin = scenePlugin;
         this.startRoom = await connectionManager.initGameConnexion();
-        await this.loadMap(this.startRoom, scenePlugin);
+        this.loadMap(this.startRoom);
 
         if (!this.playerName) {
             return LoginSceneName;
@@ -54,47 +51,49 @@ export class GameManager {
         localUserStore.setCharacterLayers(layers);
     }
 
-    getPlayerName(): string|null {
+    getPlayerName(): string | null {
         return this.playerName;
     }
 
     getCharacterLayers(): string[] {
         if (!this.characterLayers) {
-            throw 'characterLayers are not set';
+            throw "characterLayers are not set";
         }
         return this.characterLayers;
     }
 
-    
-    setCompanion(companion: string|null): void {
+    setCompanion(companion: string | null): void {
         this.companion = companion;
     }
 
-    getCompanion(): string|null {
+    getCompanion(): string | null {
         return this.companion;
     }
 
-    public async loadMap(room: Room, scenePlugin: Phaser.Scenes.ScenePlugin): Promise<void> {
-        const roomID = room.id;
-        const mapUrl = await room.getMapUrl();
+    public loadMap(room: Room) {
+        const roomID = room.key;
 
-        const gameIndex = scenePlugin.getIndex(roomID);
-        if(gameIndex === -1){
-            const game : Phaser.Scene = new GameScene(room, mapUrl);
-            scenePlugin.add(roomID, game, false);
+        const gameIndex = this.scenePlugin.getIndex(roomID);
+        if (gameIndex === -1) {
+            const game: Phaser.Scene = new GameScene(room, room.mapUrl);
+            this.scenePlugin.add(roomID, game, false);
         }
     }
 
-    public goToStartingMap(scenePlugin: Phaser.Scenes.ScenePlugin): void {
-        console.log('starting '+ (this.currentGameSceneName || this.startRoom.id))
-        scenePlugin.start(this.currentGameSceneName || this.startRoom.id);
-        scenePlugin.launch(MenuSceneName);
-        
-        if (!localUserStore.getHelpCameraSettingsShown()) {
-            scenePlugin.launch(HelpCameraSettingsSceneName);//700
+    public goToStartingMap(): void {
+        console.log("starting " + (this.currentGameSceneName || this.startRoom.key));
+        this.scenePlugin.start(this.currentGameSceneName || this.startRoom.key);
+        this.scenePlugin.launch(MenuSceneName);
+
+        if (
+            !localUserStore.getHelpCameraSettingsShown() &&
+            (!get(requestedMicrophoneState) || !get(requestedCameraState))
+        ) {
+            helpCameraSettingsVisibleStore.set(true);
+            localUserStore.setHelpCameraSettingsShown();
         }
     }
-    
+
     public gameSceneIsCreated(scene: GameScene) {
         this.currentGameSceneName = scene.scene.key;
         const menuScene: MenuScene = scene.scene.get(MenuSceneName) as MenuScene;
@@ -105,33 +104,33 @@ export class GameManager {
      * Temporary leave a gameScene to go back to the loginScene for example.
      * This will close the socket connections and stop the gameScene, but won't remove it.
      */
-    leaveGame(scene: Phaser.Scene, targetSceneName: string, sceneClass: Phaser.Scene): void {
-        if (this.currentGameSceneName === null) throw 'No current scene id set!';
-        const gameScene: GameScene = scene.scene.get(this.currentGameSceneName) as GameScene;
+    leaveGame(targetSceneName: string, sceneClass: Phaser.Scene): void {
+        if (this.currentGameSceneName === null) throw "No current scene id set!";
+        const gameScene: GameScene = this.scenePlugin.get(this.currentGameSceneName) as GameScene;
         gameScene.cleanupClosingScene();
-        scene.scene.stop(this.currentGameSceneName);
-        scene.scene.sleep(MenuSceneName);
-        if (!scene.scene.get(targetSceneName)) {
-            scene.scene.add(targetSceneName, sceneClass, false);
+        this.scenePlugin.stop(this.currentGameSceneName);
+        this.scenePlugin.sleep(MenuSceneName);
+        if (!this.scenePlugin.get(targetSceneName)) {
+            this.scenePlugin.add(targetSceneName, sceneClass, false);
         }
-        scene.scene.run(targetSceneName);
+        this.scenePlugin.run(targetSceneName);
     }
 
     /**
      * follow up to leaveGame()
      */
-    tryResumingGame(scene: Phaser.Scene, fallbackSceneName: string) {
+    tryResumingGame(fallbackSceneName: string) {
         if (this.currentGameSceneName) {
-            scene.scene.start(this.currentGameSceneName);
-            scene.scene.wake(MenuSceneName);
+            this.scenePlugin.start(this.currentGameSceneName);
+            this.scenePlugin.wake(MenuSceneName);
         } else {
-            scene.scene.run(fallbackSceneName)
+            this.scenePlugin.run(fallbackSceneName);
         }
     }
-    
-    public getCurrentGameScene(scene: Phaser.Scene): GameScene {
-        if (this.currentGameSceneName === null) throw 'No current scene id set!';
-        return scene.scene.get(this.currentGameSceneName) as GameScene
+
+    public getCurrentGameScene(): GameScene {
+        if (this.currentGameSceneName === null) throw "No current scene id set!";
+        return this.scenePlugin.get(this.currentGameSceneName) as GameScene;
     }
 }
 

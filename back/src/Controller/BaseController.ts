@@ -1,5 +1,4 @@
-import {HttpResponse} from "uWebSockets.js";
-
+import { HttpResponse } from "uWebSockets.js";
 
 export class BaseController {
     protected addCorsHeaders(res: HttpResponse): void {
