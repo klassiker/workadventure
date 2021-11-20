@@ -122,7 +122,7 @@ class ConnectionManager {
                 try {
                     const lastRoomUrl = await localUserStore.getLastRoomUrlCacheApi();
                     if (lastRoomUrl != undefined) {
-                        roomPath = lastRoomUrl;
+//                        roomPath = lastRoomUrl;
                     }
                 } catch (err) {
                     console.error(err);
