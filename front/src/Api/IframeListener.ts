@@ -30,6 +30,7 @@ import { SetTilesEvent, isSetTilesEvent } from "./Events/SetTilesEvent";
 import type { SetVariableEvent } from "./Events/SetVariableEvent";
 import { ModifyEmbeddedWebsiteEvent, isEmbeddedWebsiteEvent } from "./Events/EmbeddedWebsiteEvent";
 import { handleMenuRegistrationEvent, handleMenuUnregisterEvent } from "../Stores/MenuStore";
+import type { ChangeLayerEvent } from "./Events/ChangeLayerEvent";
 
 type AnswererCallback<T extends keyof IframeQueryMap> = (
     query: IframeQueryMap[T]["query"],
@@ -48,7 +49,7 @@ class IframeListener {
     public readonly openTabStream = this._openTabStream.asObservable();
 
     private readonly _loadPageStream: Subject<string> = new Subject();
-    public readonly loadPageStream = this._loadPageStream.asObservable()
+    public readonly loadPageStream = this._loadPageStream.asObservable();
 
     private readonly _disablePlayerControlStream: Subject<void> = new Subject();
     public readonly disablePlayerControlStream = this._disablePlayerControlStream.asObservable();
@@ -392,6 +393,24 @@ class IframeListener {
             data: {
                 name: name,
             } as EnterLeaveEvent,
+        });
+    }
+
+    sendEnterLayerEvent(layerName: string) {
+        this.postMessage({
+            type: "enterLayerEvent",
+            data: {
+                name: layerName,
+            } as ChangeLayerEvent,
+        });
+    }
+
+    sendLeaveLayerEvent(layerName: string) {
+        this.postMessage({
+            type: "leaveLayerEvent",
+            data: {
+                name: layerName,
+            } as ChangeLayerEvent,
         });
     }
 

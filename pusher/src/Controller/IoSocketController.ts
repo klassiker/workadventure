@@ -26,10 +26,11 @@ import { jwtTokenManager, tokenInvalidException } from "../Services/JWTTokenMana
 import { adminApi, FetchMemberDataByUuidResponse } from "../Services/AdminApi";
 import { SocketManager, socketManager } from "../Services/SocketManager";
 import { emitInBatch } from "../Services/IoSocketHelpers";
-import { ADMIN_SOCKETS_TOKEN, ADMIN_API_URL, SOCKET_IDLE_TIMER } from "../Enum/EnvironmentVariable";
+import { ADMIN_SOCKETS_TOKEN, ADMIN_API_URL, DISABLE_ANONYMOUS, SOCKET_IDLE_TIMER } from "../Enum/EnvironmentVariable";
 import { Zone } from "_Model/Zone";
 import { ExAdminSocketInterface } from "_Model/Websocket/ExAdminSocketInterface";
 import { CharacterTexture } from "../Services/AdminApi/CharacterTexture";
+import log from "../Services/Logger";
 
 export class IoSocketController {
     private nextUserId: number = 1;
@@ -47,30 +48,32 @@ export class IoSocketController {
                 const websocketProtocol = req.getHeader("sec-websocket-protocol");
                 const websocketExtensions = req.getHeader("sec-websocket-extensions");
                 const token = query.token;
-                if (token !== ADMIN_SOCKETS_TOKEN) {
-                    console.log("Admin access refused for token: " + token);
+                let authorizedRoomIds: string[];
+                try {
+                    const data = jwtTokenManager.verifyAdminSocketToken(token as string);
+                    authorizedRoomIds = data.authorizedRoomIds;
+                } catch (e) {
+                    log.info("Admin access refused for token: " + token);
                     res.writeStatus("401 Unauthorized").end("Incorrect token");
                     return;
                 }
                 const roomId = query.roomId;
-                if (typeof roomId !== "string") {
-                    console.error("Received");
-                    res.writeStatus("400 Bad Request").end("Missing room id");
+                if (typeof roomId !== "string" || !authorizedRoomIds.includes(roomId)) {
+                    log.error("Invalid room id");
+                    res.writeStatus("403 Bad Request").end("Invalid room id");
                     return;
                 }
 
                 res.upgrade({ roomId }, websocketKey, websocketProtocol, websocketExtensions, context);
             },
             open: (ws) => {
-                console.log("Admin socket connect for room: " + ws.roomId);
+                log.info("Admin socket connect for room: " + ws.roomId);
                 ws.disconnecting = false;
 
                 socketManager.handleAdminRoom(ws as ExAdminSocketInterface, ws.roomId as string);
             },
             message: (ws, arrayBuffer, isBinary): void => {
                 try {
-                    const roomId = ws.roomId as string;
-
                     //TODO refactor message type and data
                     const message: { event: string; message: { type: string; message: unknown; userUuid: string } } =
                         JSON.parse(new TextDecoder("utf-8").decode(new Uint8Array(arrayBuffer)));
@@ -95,7 +98,7 @@ export class IoSocketController {
                         }
                     }
                 } catch (err) {
-                    console.error(err);
+                    log.error(err);
                 }
             },
             close: (ws, code, message) => {
@@ -104,8 +107,8 @@ export class IoSocketController {
                     Client.disconnecting = true;
                     socketManager.leaveAdminRoom(Client);
                 } catch (e) {
-                    console.error('An error occurred on admin "disconnect"');
-                    console.error(e);
+                    log.error('An error occurred on admin "disconnect"');
+                    log.error(e);
                 }
             },
         });
@@ -174,6 +177,11 @@ export class IoSocketController {
 
                         const tokenData =
                             token && typeof token === "string" ? jwtTokenManager.verifyJWTToken(token) : null;
+
+                        if (DISABLE_ANONYMOUS && !tokenData) {
+                            throw new Error("Expecting token");
+                        }
+
                         const userIdentifier = tokenData ? tokenData.identifier : "";
 
                         let memberTags: string[] = [];
@@ -182,6 +190,7 @@ export class IoSocketController {
                         let memberTextures: CharacterTexture[] = [];
                         const room = await socketManager.getOrCreateRoom(roomId);
                         let userData: FetchMemberDataByUuidResponse = {
+                            email: userIdentifier,
                             userUuid: userIdentifier,
                             tags: [],
                             visitCardUrl: null,
@@ -197,7 +206,7 @@ export class IoSocketController {
                                     if (err?.response?.status == 404) {
                                         // If we get an HTTP 404, the token is invalid. Let's perform an anonymous login!
 
-                                        console.warn(
+                                        log.warn(
                                             'Cannot find user with email "' +
                                                 (userIdentifier || "anonymous") +
                                                 '". Performing an anonymous login instead.'
@@ -237,13 +246,13 @@ export class IoSocketController {
                                     throw new Error("Use the login URL to connect");
                                 }
                             } catch (e) {
-                                console.log(
+                                log.info(
                                     "access not granted for user " +
                                         (userIdentifier || "anonymous") +
                                         " and room " +
                                         roomId
                                 );
-                                console.error(e);
+                                log.error(e);
                                 throw new Error("User cannot access this world");
                             }
                         }
@@ -253,7 +262,7 @@ export class IoSocketController {
                             SocketManager.mergeCharacterLayersAndCustomTextures(characterLayers, memberTextures);
 
                         if (upgradeAborted.aborted) {
-                            console.log("Ouch! Client disconnected before we could upgrade it!");
+                            log.info("Ouch! Client disconnected before we could upgrade it!");
                             /* You must not upgrade now */
                             return;
                         }
@@ -394,7 +403,7 @@ export class IoSocketController {
                 //let ok = ws.send(message, isBinary);
             },
             drain: (ws) => {
-                console.log("WebSocket backpressure: " + ws.getBufferedAmount());
+                log.info("WebSocket backpressure: " + ws.getBufferedAmount());
             },
             close: (ws, code, message) => {
                 const Client = ws as ExSocketInterface;
@@ -403,8 +412,8 @@ export class IoSocketController {
                     //leave room
                     socketManager.leaveRoom(Client);
                 } catch (e) {
-                    console.error('An error occurred on "disconnect"');
-                    console.error(e);
+                    log.error('An error occurred on "disconnect"');
+                    log.error(e);
                 }
             },
         });

@@ -5,6 +5,8 @@ import { adminApi, FetchMemberDataByUuidResponse } from "../Services/AdminApi";
 import { AuthTokenData, jwtTokenManager } from "../Services/JWTTokenManager";
 import { parse } from "query-string";
 import { openIDClient } from "../Services/OpenIDClient";
+import { DISABLE_ANONYMOUS } from "../Enum/EnvironmentVariable";
+import log from "../Services/Logger";
 
 export interface TokenInterface {
     userUuid: string;
@@ -24,7 +26,7 @@ export class AuthenticateController extends BaseController {
         //eslint-disable-next-line @typescript-eslint/no-misused-promises
         this.App.get("/login-screen", async (res: HttpResponse, req: HttpRequest) => {
             res.onAborted(() => {
-                console.warn("/message request was aborted");
+                log.warn("/message request was aborted");
             });
 
             try {
@@ -43,7 +45,7 @@ export class AuthenticateController extends BaseController {
                 res.writeHeader("Location", loginUri);
                 return res.end();
             } catch (e) {
-                console.error("openIDLogin => e", e);
+                log.error("openIDLogin => e", e);
                 return this.errorToResponse(e, res);
             }
         });
@@ -53,7 +55,7 @@ export class AuthenticateController extends BaseController {
         //eslint-disable-next-line @typescript-eslint/no-misused-promises
         this.App.get("/login-callback", async (res: HttpResponse, req: HttpRequest) => {
             res.onAborted(() => {
-                console.warn("/message request was aborted");
+                log.warn("/message request was aborted");
             });
             const IPAddress = req.getHeader("x-forwarded-for");
             const { code, nonce, token, playUri } = parse(req.getQuery());
@@ -62,23 +64,32 @@ export class AuthenticateController extends BaseController {
                 if (token != undefined) {
                     try {
                         const authTokenData: AuthTokenData = jwtTokenManager.verifyJWTToken(token as string, false);
-                        if (authTokenData.hydraAccessToken == undefined) {
-                            throw Error("Token cannot to be check on Hydra");
-                        }
-                        await openIDClient.checkTokenAuth(authTokenData.hydraAccessToken);
 
                         //Get user data from Admin Back Office
                         //This is very important to create User Local in LocalStorage in WorkAdventure
-                        const data = await this.getUserByUserIdentifier(
+                        const resUserData = await this.getUserByUserIdentifier(
                             authTokenData.identifier,
                             playUri as string,
                             IPAddress
                         );
+
+                        if (authTokenData.accessToken == undefined) {
+                            //if not nonce and code, user connected in anonymous
+                            //get data with identifier and return token
+                            if (!code && !nonce) {
+                                res.writeStatus("200");
+                                this.addCorsHeaders(res);
+                                return res.end(JSON.stringify({ ...resUserData, authToken: token }));
+                            }
+                            throw Error("Token cannot to be check on Hydra");
+                        }
+
+                        const resCheckTokenAuth = await openIDClient.checkTokenAuth(authTokenData.accessToken);
                         res.writeStatus("200");
                         this.addCorsHeaders(res);
-                        return res.end(JSON.stringify({ ...data, authToken: token }));
+                        return res.end(JSON.stringify({ ...resCheckTokenAuth, ...resUserData, authToken: token }));
                     } catch (err) {
-                        console.info("User was not connected", err);
+                        log.info("User was not connected", err);
                     }
                 }
 
@@ -88,7 +99,7 @@ export class AuthenticateController extends BaseController {
                 if (!email) {
                     throw new Error("No email in the response");
                 }
-                const authToken = jwtTokenManager.createAuthToken(email, userInfo.access_token);
+                const authToken = jwtTokenManager.createAuthToken(email, userInfo?.access_token);
 
                 //Get user data from Admin Back Office
                 //This is very important to create User Local in LocalStorage in WorkAdventure
@@ -98,7 +109,7 @@ export class AuthenticateController extends BaseController {
                 this.addCorsHeaders(res);
                 return res.end(JSON.stringify({ ...data, authToken }));
             } catch (e) {
-                console.error("openIDCallback => ERROR", e);
+                log.error("openIDCallback => ERROR", e);
                 return this.errorToResponse(e, res);
             }
         });
@@ -106,19 +117,19 @@ export class AuthenticateController extends BaseController {
         // eslint-disable-next-line @typescript-eslint/no-misused-promises
         this.App.get("/logout-callback", async (res: HttpResponse, req: HttpRequest) => {
             res.onAborted(() => {
-                console.warn("/message request was aborted");
+                log.warn("/message request was aborted");
             });
 
             const { token } = parse(req.getQuery());
 
             try {
                 const authTokenData: AuthTokenData = jwtTokenManager.verifyJWTToken(token as string, false);
-                if (authTokenData.hydraAccessToken == undefined) {
+                if (authTokenData.accessToken == undefined) {
                     throw Error("Token cannot to be logout on Hydra");
                 }
-                await openIDClient.logoutUser(authTokenData.hydraAccessToken);
+                await openIDClient.logoutUser(authTokenData.accessToken);
             } catch (error) {
-                console.error("openIDCallback => logout-callback", error);
+                log.error("openIDCallback => logout-callback", error);
             } finally {
                 res.writeStatus("200");
                 this.addCorsHeaders(res);
@@ -139,7 +150,7 @@ export class AuthenticateController extends BaseController {
         this.App.post("/register", (res: HttpResponse, req: HttpRequest) => {
             (async () => {
                 res.onAborted(() => {
-                    console.warn("Login request was aborted");
+                    log.warn("Login request was aborted");
                 });
                 const param = await res.json();
 
@@ -170,7 +181,7 @@ export class AuthenticateController extends BaseController {
                         })
                     );
                 } catch (e) {
-                    console.error("register => ERROR", e);
+                    log.error("register => ERROR", e);
                     this.errorToResponse(e, res);
                 }
             })();
@@ -186,19 +197,24 @@ export class AuthenticateController extends BaseController {
 
         this.App.post("/anonymLogin", (res: HttpResponse, req: HttpRequest) => {
             res.onAborted(() => {
-                console.warn("Login request was aborted");
+                log.warn("Login request was aborted");
             });
 
-            const userUuid = v4();
-            const authToken = jwtTokenManager.createAuthToken(userUuid);
-            res.writeStatus("200 OK");
-            this.addCorsHeaders(res);
-            res.end(
-                JSON.stringify({
-                    authToken,
-                    userUuid,
-                })
-            );
+            if (DISABLE_ANONYMOUS) {
+                res.writeStatus("403 FORBIDDEN");
+                res.end();
+            } else {
+                const userUuid = v4();
+                const authToken = jwtTokenManager.createAuthToken(userUuid);
+                res.writeStatus("200 OK");
+                this.addCorsHeaders(res);
+                res.end(
+                    JSON.stringify({
+                        authToken,
+                        userUuid,
+                    })
+                );
+            }
         });
     }
 
@@ -208,22 +224,22 @@ export class AuthenticateController extends BaseController {
         // eslint-disable-next-line @typescript-eslint/no-misused-promises
         this.App.get("/profile-callback", async (res: HttpResponse, req: HttpRequest) => {
             res.onAborted(() => {
-                console.warn("/message request was aborted");
+                log.warn("/message request was aborted");
             });
-            const { userIdentify, token } = parse(req.getQuery());
+            const { token } = parse(req.getQuery());
             try {
                 //verify connected by token
                 if (token != undefined) {
                     try {
                         const authTokenData: AuthTokenData = jwtTokenManager.verifyJWTToken(token as string, false);
-                        if (authTokenData.hydraAccessToken == undefined) {
+                        if (authTokenData.accessToken == undefined) {
                             throw Error("Token cannot to be check on Hydra");
                         }
-                        await openIDClient.checkTokenAuth(authTokenData.hydraAccessToken);
+                        await openIDClient.checkTokenAuth(authTokenData.accessToken);
 
                         //get login profile
                         res.writeStatus("302");
-                        res.writeHeader("Location", adminApi.getProfileUrl(authTokenData.hydraAccessToken));
+                        res.writeHeader("Location", adminApi.getProfileUrl(authTokenData.accessToken));
                         this.addCorsHeaders(res);
                         // eslint-disable-next-line no-unsafe-finally
                         return res.end();
@@ -232,7 +248,7 @@ export class AuthenticateController extends BaseController {
                     }
                 }
             } catch (error) {
-                console.error("profileCallback => ERROR", error);
+                log.error("profileCallback => ERROR", error);
                 this.errorToResponse(error, res);
             }
         });
@@ -251,7 +267,14 @@ export class AuthenticateController extends BaseController {
         playUri: string,
         IPAddress: string
     ): Promise<FetchMemberDataByUuidResponse | object> {
-        let data: FetchMemberDataByUuidResponse | object = {};
+        let data: FetchMemberDataByUuidResponse = {
+            email: email,
+            userUuid: email,
+            tags: [],
+            messages: [],
+            visitCardUrl: null,
+            textures: [],
+        };
         try {
             data = await adminApi.fetchMemberDataByUuid(email, playUri, IPAddress);
         } catch (err) {
