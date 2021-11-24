@@ -10,6 +10,7 @@ import { DEPTH_INGAME_TEXT_INDEX } from "../Game/DepthIndexes";
 import { waScaleManager } from "../Services/WaScaleManager";
 import type OutlinePipelinePlugin from "phaser3-rex-plugins/plugins/outlinepipeline-plugin.js";
 import { isSilentStore } from "../../Stores/MediaStore";
+import { lazyLoadPlayerCharacterTextures } from "./PlayerTexturesLoadingManager";
 
 const playerNameY = -25;
 
@@ -57,10 +58,17 @@ export abstract class Character extends Container {
         this.sprites = new Map<string, Sprite>();
 
         //textures are inside a Promise in case they need to be lazyloaded before use.
-        texturesPromise.then((textures) => {
-            this.addTextures(textures, frame);
-            this.invisible = false;
-        });
+        texturesPromise
+            .then((textures) => {
+                this.addTextures(textures, frame);
+                this.invisible = false;
+            })
+            .catch(() => {
+                return lazyLoadPlayerCharacterTextures(scene.load, ["color_22", "eyes_23"]).then((textures) => {
+                    this.addTextures(textures, frame);
+                    this.invisible = false;
+                });
+            });
 
         this.playerName = new Text(scene, 0, playerNameY, name, {
             fontFamily: '"Press Start 2P"',
@@ -293,7 +301,7 @@ export abstract class Character extends Container {
         this.cancelPreviousEmote();
         const emoteY = -45;
         this.playerName.setVisible(false);
-        this.emote = new Text(this.scene, -10, 0, emote, { fontFamily: '"Twemoji Mozilla"', fontSize: "20px" });
+        this.emote = new Text(this.scene, -10, 0, emote, { fontSize: "20px" });
         this.emote.setAlpha(0);
         this.add(this.emote);
         this.createStartTransition(emoteY);
