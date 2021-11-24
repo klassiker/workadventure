@@ -2,10 +2,15 @@ import { get, writable } from "svelte/store";
 import Timeout = NodeJS.Timeout;
 import { userIsAdminStore } from "./GameStore";
 import { CONTACT_URL } from "../Enum/EnvironmentVariable";
+import {analyticsClient} from "../Administration/AnalyticsClient";
 
 export const menuIconVisiblilityStore = writable(false);
 export const menuVisiblilityStore = writable(false);
+menuVisiblilityStore.subscribe((value) => {
+    if (value) analyticsClient.openedMenu();
+})
 export const menuInputFocusStore = writable(false);
+export const userIsConnected = writable(false);
 
 let warningContainerTimeout: Timeout | null = null;
 function createWarningContainerStore() {
@@ -69,7 +74,7 @@ function createSubMenusStore() {
 
 export const subMenusStore = createSubMenusStore();
 
-function checkSubMenuToShow() {
+export function checkSubMenuToShow() {
     if (!get(userIsAdminStore)) {
         subMenusStore.removeMenu(SubMenusInterface.globalMessages);
     }
@@ -79,4 +84,34 @@ function checkSubMenuToShow() {
     }
 }
 
-checkSubMenuToShow();
+export const customMenuIframe = new Map<string, { url: string; allowApi: boolean }>();
+
+export function handleMenuRegistrationEvent(
+    menuName: string,
+    iframeUrl: string | undefined = undefined,
+    source: string | undefined = undefined,
+    options: { allowApi: boolean }
+) {
+    if (get(subMenusStore).includes(menuName)) {
+        console.warn("The menu " + menuName + " already exist.");
+        return;
+    }
+
+    subMenusStore.addMenu(menuName);
+
+    if (iframeUrl !== undefined) {
+        const url = new URL(iframeUrl, source);
+        customMenuIframe.set(menuName, { url: url.toString(), allowApi: options.allowApi });
+    }
+}
+
+export function handleMenuUnregisterEvent(menuName: string) {
+    const subMenuGeneral: string[] = Object.values(SubMenusInterface);
+    if (subMenuGeneral.includes(menuName)) {
+        console.warn("The menu " + menuName + " is a mandatory menu. It can't be remove");
+        return;
+    }
+
+    subMenusStore.removeMenu(menuName);
+    customMenuIframe.delete(menuName);
+}

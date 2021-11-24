@@ -29,12 +29,12 @@ import { isSetPropertyEvent, SetPropertyEvent } from "./Events/setPropertyEvent"
 import { isLayerEvent, LayerEvent } from "./Events/LayerEvent";
 import type { HasPlayerMovedEvent } from "./Events/HasPlayerMovedEvent";
 import { isLoadPageEvent } from "./Events/LoadPageEvent";
-import { handleMenuItemRegistrationEvent, isMenuItemRegisterIframeEvent } from "./Events/ui/MenuItemRegisterEvent";
+import { isMenuRegisterEvent, isUnregisterMenuEvent } from "./Events/ui/MenuRegisterEvent";
 import { SetTilesEvent, isSetTilesEvent } from "./Events/SetTilesEvent";
 import type { SetVariableEvent } from "./Events/SetVariableEvent";
 import { ModifyEmbeddedWebsiteEvent, isEmbeddedWebsiteEvent } from "./Events/EmbeddedWebsiteEvent";
 import { EmbeddedWebsite } from "./iframe/Room/EmbeddedWebsite";
-import { subMenusStore } from "../Stores/MenuStore";
+import { handleMenuRegistrationEvent, handleMenuUnregisterEvent } from "../Stores/MenuStore";
 
 type AnswererCallback<T extends keyof IframeQueryMap> = (
     query: IframeQueryMap[T]["query"],
@@ -46,29 +46,17 @@ type AnswererCallback<T extends keyof IframeQueryMap> = (
  * Also allows to send messages to those iframes.
  */
 class IframeListener {
-    private readonly _readyStream: Subject<HTMLIFrameElement> = new Subject();
-    public readonly readyStream = this._readyStream.asObservable();
-
-    private readonly _chatStream: Subject<ChatEvent> = new Subject();
-    public readonly chatStream = this._chatStream.asObservable();
-
     private readonly _openPopupStream: Subject<OpenPopupEvent> = new Subject();
     public readonly openPopupStream = this._openPopupStream.asObservable();
 
     private readonly _openTabStream: Subject<OpenTabEvent> = new Subject();
     public readonly openTabStream = this._openTabStream.asObservable();
 
-    private readonly _goToPageStream: Subject<GoToPageEvent> = new Subject();
-    public readonly goToPageStream = this._goToPageStream.asObservable();
-
     private readonly _loadPageStream: Subject<string> = new Subject();
     public readonly loadPageStream = this._loadPageStream.asObservable();
 
     private readonly _openCoWebSiteStream: Subject<OpenCoWebSiteEvent> = new Subject();
     public readonly openCoWebSiteStream = this._openCoWebSiteStream.asObservable();
-
-    private readonly _closeCoWebSiteStream: Subject<void> = new Subject();
-    public readonly closeCoWebSiteStream = this._closeCoWebSiteStream.asObservable();
 
     private readonly _disablePlayerControlStream: Subject<void> = new Subject();
     public readonly disablePlayerControlStream = this._disablePlayerControlStream.asObservable();
@@ -219,7 +207,7 @@ class IframeListener {
                     } else if (payload.type === "setProperty" && isSetPropertyEvent(payload.data)) {
                         this._setPropertyStream.next(payload.data);
                     } else if (payload.type === "chat" && isChatEvent(payload.data)) {
-                        this._chatStream.next(payload.data);
+                        scriptUtils.sendAnonymousChat(payload.data);
                     } else if (payload.type === "openPopup" && isOpenPopupEvent(payload.data)) {
                         this._openPopupStream.next(payload.data);
                     } else if (payload.type === "closePopup" && isClosePopupEvent(payload.data)) {
@@ -255,17 +243,23 @@ class IframeListener {
                         this._removeBubbleStream.next();
                     } else if (payload.type == "onPlayerMove") {
                         this.sendPlayerMove = true;
-                    } else if (isMenuItemRegisterIframeEvent(payload)) {
-                        const data = payload.data.menutItem;
-                        // @ts-ignore
-                        this.iframeCloseCallbacks.get(iframe).push(() => {
-                            subMenusStore.removeMenu(data);
-                        });
-                        handleMenuItemRegistrationEvent(payload.data);
                     } else if (payload.type == "setTiles" && isSetTilesEvent(payload.data)) {
                         this._setTilesStream.next(payload.data);
                     } else if (payload.type == "modifyEmbeddedWebsite" && isEmbeddedWebsiteEvent(payload.data)) {
                         this._modifyEmbeddedWebsiteStream.next(payload.data);
+                    } else if (payload.type == "registerMenu" && isMenuRegisterEvent(payload.data)) {
+                        const dataName = payload.data.name;
+                        this.iframeCloseCallbacks.get(iframe)?.push(() => {
+                            handleMenuUnregisterEvent(dataName);
+                        });
+                        handleMenuRegistrationEvent(
+                            payload.data.name,
+                            payload.data.iframe,
+                            foundSrc,
+                            payload.data.options
+                        );
+                    } else if (payload.type == "unregisterMenu" && isUnregisterMenuEvent(payload.data)) {
+                        handleMenuUnregisterEvent(payload.data.name);
                     }
                 }
             },

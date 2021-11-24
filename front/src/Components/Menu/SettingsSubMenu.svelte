@@ -3,6 +3,7 @@ import {localUserStore} from "../../Connexion/LocalUserStore";
 import {videoConstraintStore} from "../../Stores/MediaStore";
 import {HtmlUtils} from "../../WebRtc/HtmlUtils";
 import {isMobile} from "../../Enum/EnvironmentVariable";
+import {menuVisiblilityStore} from "../../Stores/MenuStore";
 
 let fullscreen : boolean = localUserStore.getFullscreen();
 let notification : boolean = localUserStore.getNotification() === 'granted';
@@ -22,6 +23,8 @@ function saveSetting(){
         previewValueVideo = valueVideo;
         videoConstraintStore.setFrameRate(valueVideo);
     }
+
+    closeMenu();
 }
 
 function changeFullscreen() {
@@ -49,6 +52,10 @@ function changeNotification() {
             }
         })
     }
+}
+
+function closeMenu() {
+    menuVisiblilityStore.set(false);
 }
 </script>
 
@@ -94,6 +101,7 @@ function changeNotification() {
 <style lang="scss">
   div.settings-main {
     height: calc(100% - 40px);
+    overflow-y: auto;
 
     section {
       width: 100%;
@@ -112,14 +120,14 @@ function changeNotification() {
       }
     }
     section.settings-section-noSaveOption {
-      --nb-noSaveOptions: 2; //number of sub-element in the section
-      display: grid;
-      grid-template-columns: calc(100% / var(--nb-noSaveOptions)) calc(100% / var(--nb-noSaveOptions)); //Same size for every sub-element
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
 
       label {
+        flex: 1 1 auto;
         text-align: center;
-        width: 100%;
-        margin: 0;
+        margin: 0 0 15px;
       }
     }
   }
@@ -128,12 +136,6 @@ function changeNotification() {
     div.settings-main {
       section {
         padding: 0;
-      }
-
-      section.settings-section-noSaveOption {
-        height: 80px;
-        grid-template-columns: none;
-        grid-template-rows: calc(100% / var(--nb-noSaveOptions)) calc(100% / var(--nb-noSaveOptions)); //Same size for every sub-element;
       }
     }
   }

@@ -37,7 +37,7 @@ import { localUserStore } from "../../Connexion/LocalUserStore";
 import { HtmlUtils } from "../../WebRtc/HtmlUtils";
 import { mediaManager } from "../../WebRtc/MediaManager";
 import { SimplePeer } from "../../WebRtc/SimplePeer";
-import { addLoader } from "../Components/Loader";
+import { addLoader, removeLoader } from "../Components/Loader";
 import { OpenChatIcon, openChatIconName } from "../Components/OpenChatIcon";
 import { lazyLoadPlayerCharacterTextures, loadCustomTexture } from "../Entity/PlayerTexturesLoadingManager";
 import { RemotePlayer } from "../Entity/RemotePlayer";
@@ -92,6 +92,9 @@ import Tileset = Phaser.Tilemaps.Tileset;
 import { userIsAdminStore } from "../../Stores/GameStore";
 import { layoutManagerActionStore } from "../../Stores/LayoutManagerStore";
 import { EmbeddedWebsiteManager } from "./EmbeddedWebsiteManager";
+import { GameMapPropertiesListener } from "./GameMapPropertiesListener";
+import type { RadialMenuItem } from "../Components/RadialMenu";
+import {analyticsClient} from "../../Administration/AnalyticsClient";
 
 export interface GameSceneInitInterface {
     initPosition: PointInterface | null;
@@ -290,8 +293,11 @@ export class GameScene extends DirtyScene {
             }
 
             //once preloading is over, we don't want loading errors to crash the game, so we need to disable this behavior after preloading.
-            console.error("Error when loading: ", file);
             if (this.preloading) {
+                //remove loader in progress
+                removeLoader(this);
+
+                //display an error scene
                 this.scene.start(ErrorSceneName, {
                     title: "Network error",
                     subTitle: "An error occurred while loading resource:",
@@ -421,6 +427,7 @@ export class GameScene extends DirtyScene {
 
         gameManager.gameSceneIsCreated(this);
         urlManager.pushRoomIdToUrl(this.room);
+        analyticsClient.enteredRoom(this.room.id);
 
         if (touchScreenManager.supportTouchScreen) {
             this.pinchManager = new PinchManager(this);
@@ -580,6 +587,7 @@ export class GameScene extends DirtyScene {
             this.updateCameraOffset(box)
         );
 
+        new GameMapPropertiesListener(this, this.gameMap).register();
         this.triggerOnMapLayerPropertyChange();
 
         if (!this.room.isDisconnected()) {
@@ -712,25 +720,8 @@ export class GameScene extends DirtyScene {
                 });
 
                 // When connection is performed, let's connect SimplePeer
-                this.simplePeer = new SimplePeer(this.connection, !this.room.isPublic, this.playerName);
-                peerStore.connectToSimplePeer(this.simplePeer);
-                screenSharingPeerStore.connectToSimplePeer(this.simplePeer);
-                videoFocusStore.connectToSimplePeer(this.simplePeer);
+                this.simplePeer = new SimplePeer(this.connection);
                 userMessageManager.setReceiveBanListener(this.bannedUser.bind(this));
-
-                const self = this;
-                this.simplePeer.registerPeerConnectionListener({
-                    onConnect(peer) {
-                        //self.openChatIcon.setVisible(true);
-                        audioManagerVolumeStore.setTalking(true);
-                    },
-                    onDisconnect(userId: number) {
-                        if (self.simplePeer.getNbConnections() === 0) {
-                            //self.openChatIcon.setVisible(false);
-                            audioManagerVolumeStore.setTalking(false);
-                        }
-                    },
-                });
 
                 //listen event to share position of user
                 this.CurrentPlayer.on(hasMovedEventName, this.pushPlayerPosition.bind(this));
@@ -825,39 +816,7 @@ export class GameScene extends DirtyScene {
                 }, 2000);
             }
         });
-        this.gameMap.onPropertyChange("openWebsite", (newValue, oldValue, allProps) => {
-            if (newValue === undefined) {
-                layoutManagerActionStore.removeAction("openWebsite");
-                coWebsiteManager.closeCoWebsite();
-            } else {
-                const openWebsiteFunction = () => {
-                    coWebsiteManager.loadCoWebsite(
-                        newValue as string,
-                        this.MapUrlFile,
-                        allProps.get("openWebsiteAllowApi") as boolean | undefined,
-                        allProps.get("openWebsitePolicy") as string | undefined
-                    );
-                    layoutManagerActionStore.removeAction("openWebsite");
-                };
 
-                const openWebsiteTriggerValue = allProps.get(TRIGGER_WEBSITE_PROPERTIES);
-                if (openWebsiteTriggerValue && openWebsiteTriggerValue === ON_ACTION_TRIGGER_BUTTON) {
-                    let message = allProps.get(WEBSITE_MESSAGE_PROPERTIES);
-                    if (message === undefined) {
-                        message = "Press SPACE or touch here to open web site";
-                    }
-                    layoutManagerActionStore.addAction({
-                        uuid: "openWebsite",
-                        type: "message",
-                        message: message,
-                        callback: () => openWebsiteFunction(),
-                        userInputManager: this.userInputManager,
-                    });
-                } else {
-                    openWebsiteFunction();
-                }
-            }
-        });
         this.gameMap.onPropertyChange("jitsiRoom", (newValue, oldValue, allProps) => {
             if (newValue === undefined) {
                 layoutManagerActionStore.removeAction("jitsi");
@@ -897,8 +856,10 @@ export class GameScene extends DirtyScene {
         this.gameMap.onPropertyChange("silent", (newValue, oldValue) => {
             if (newValue === undefined || newValue === false || newValue === "") {
                 this.connection?.setSilent(false);
+                this.CurrentPlayer.noSilent();
             } else {
                 this.connection?.setSilent(true);
+                this.CurrentPlayer.isSilent();
             }
         });
         this.gameMap.onPropertyChange("playAudio", (newValue, oldValue, allProps) => {
@@ -1240,30 +1201,10 @@ ${escapedMessage}
         propertyName: string,
         propertyValue: string | number | boolean | undefined
     ): void {
-        const layer = this.gameMap.findLayer(layerName);
-        if (layer === undefined) {
-            console.warn('Could not find layer "' + layerName + '" when calling setProperty');
-            return;
-        }
         if (propertyName === "exitUrl" && typeof propertyValue === "string") {
             this.loadNextGameFromExitUrl(propertyValue);
         }
-        if (layer.properties === undefined) {
-            layer.properties = [];
-        }
-        const property = layer.properties.find((property) => property.name === propertyName);
-        if (property === undefined) {
-            if (propertyValue === undefined) {
-                return;
-            }
-            layer.properties.push({ name: propertyName, type: typeof propertyValue, value: propertyValue });
-            return;
-        }
-        if (propertyValue === undefined) {
-            const index = layer.properties.indexOf(property);
-            layer.properties.splice(index, 1);
-        }
-        property.value = propertyValue;
+        this.gameMap.setLayerProperty(layerName, propertyName, propertyValue);
     }
 
     private setLayerVisibility(layerName: string, visible: boolean): void {
@@ -1297,6 +1238,8 @@ ${escapedMessage}
         if (this.mapTransitioning) return;
         this.mapTransitioning = true;
 
+        this.gameMap.triggerExitCallbacks();
+
         let targetRoom: Room;
         try {
             targetRoom = await Room.createRoom(roomUrl);
@@ -1325,7 +1268,9 @@ ${escapedMessage}
         if (!targetRoom.isEqual(this.room)) {
             if (this.scene.get(targetRoom.key) === null) {
                 console.error("next room not loaded", targetRoom.key);
-                return;
+                // Try to load next dame room from exit URL
+                // The policy of room can to be updated during a session and not load before
+                await this.loadNextGameFromExitUrl(targetRoom.key);
             }
             this.cleanupClosingScene();
             this.scene.stop();
@@ -1497,6 +1442,7 @@ ${escapedMessage}
             });
             this.CurrentPlayer.on(requestEmoteEventName, (emoteKey: string) => {
                 this.connection?.emitEmoteEvent(emoteKey);
+                analyticsClient.launchEmote(emoteKey);
             });
         } catch (err) {
             if (err instanceof TextureError) {
@@ -1859,23 +1805,26 @@ ${escapedMessage}
             "jitsiInterfaceConfig"
         );
         const jitsiUrl = allProps.get("jitsiUrl") as string | undefined;
+        const jitsiWidth = allProps.get("jitsiWidth") as number | undefined;
 
-        jitsiFactory.start(roomName, this.playerName, jwt, jitsiConfig, jitsiInterfaceConfig, jitsiUrl);
+        jitsiFactory.start(roomName, this.playerName, jwt, jitsiConfig, jitsiInterfaceConfig, jitsiUrl, jitsiWidth);
         this.connection?.setSilent(true);
         mediaManager.hideGameOverlay();
+        analyticsClient.enteredJitsi(roomName, this.room.id);
 
         //permit to stop jitsi when user close iframe
-        mediaManager.addTriggerCloseJitsiFrameButton("close-jisi", () => {
+        mediaManager.addTriggerCloseJitsiFrameButton("close-jitsi", () => {
             this.stopJitsi();
         });
     }
 
     public stopJitsi(): void {
-        this.connection?.setSilent(false);
+        const silent = this.gameMap.getCurrentProperties().get("silent");
+        this.connection?.setSilent(!!silent);
         jitsiFactory.stop();
         mediaManager.showGameOverlay();
 
-        mediaManager.removeTriggerCloseJitsiFrameButton("close-jisi");
+        mediaManager.removeTriggerCloseJitsiFrameButton("close-jitsi");
     }
 
     //todo: put this into an 'orchestrator' scene (EntryScene?)
