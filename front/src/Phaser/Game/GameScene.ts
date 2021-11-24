@@ -25,7 +25,7 @@ import {
     TRIGGER_WEBSITE_PROPERTIES,
     WEBSITE_MESSAGE_PROPERTIES,
 } from "../../WebRtc/LayoutManager";
-import { coWebsiteManager } from "../../WebRtc/CoWebsiteManager";
+import { CoWebsite, coWebsiteManager } from "../../WebRtc/CoWebsiteManager";
 import type { UserMovedMessage } from "../../Messages/generated/messages_pb";
 import { ProtobufClientUtils } from "../../Network/ProtobufClientUtils";
 import type { RoomConnection } from "../../Connexion/RoomConnection";
@@ -38,7 +38,6 @@ import { HtmlUtils } from "../../WebRtc/HtmlUtils";
 import { mediaManager } from "../../WebRtc/MediaManager";
 import { SimplePeer } from "../../WebRtc/SimplePeer";
 import { addLoader, removeLoader } from "../Components/Loader";
-import { OpenChatIcon, openChatIconName } from "../Components/OpenChatIcon";
 import { lazyLoadPlayerCharacterTextures, loadCustomTexture } from "../Entity/PlayerTexturesLoadingManager";
 import { RemotePlayer } from "../Entity/RemotePlayer";
 import type { ActionableItem } from "../Items/ActionableItem";
@@ -96,7 +95,6 @@ import { EmbeddedWebsiteManager } from "./EmbeddedWebsiteManager";
 import { GameMapPropertiesListener } from "./GameMapPropertiesListener";
 import { analyticsClient } from "../../Administration/AnalyticsClient";
 import { get } from "svelte/store";
-import type { RadialMenuItem } from "../Components/RadialMenu";
 import { contactPageStore } from "../../Stores/MenuStore";
 
 export interface GameSceneInitInterface {
@@ -174,7 +172,6 @@ export class GameScene extends DirtyScene {
     private createPromiseResolve!: (value?: void | PromiseLike<void>) => void;
     private iframeSubscriptionList!: Array<Subscription>;
     private peerStoreUnsubscribe!: () => void;
-    private chatVisibilityUnsubscribe!: () => void;
     private emoteUnsubscribe!: () => void;
     private emoteMenuUnsubscribe!: () => void;
     private biggestAvailableAreaStoreUnsubscribe!: () => void;
@@ -197,7 +194,6 @@ export class GameScene extends DirtyScene {
     private outlinedItem: ActionableItem | null = null;
     public userInputManager!: UserInputManager;
     private isReconnecting: boolean | undefined = undefined;
-    private openChatIcon!: OpenChatIcon;
     private playerName!: string;
     private characterLayers!: string[];
     private companion!: string | null;
@@ -245,7 +241,6 @@ export class GameScene extends DirtyScene {
             }
         }
 
-        this.load.image(openChatIconName, "resources/objects/talk.png");
         if (touchScreenManager.supportTouchScreen) {
             this.load.image(joystickBaseKey, joystickBaseImg);
             this.load.image(joystickThumbKey, joystickThumbImg);
@@ -294,6 +289,12 @@ export class GameScene extends DirtyScene {
                         this.onMapLoad(data);
                     }
                 );
+                // If the map has already been loaded as part of another GameScene, the "on load" event will not be triggered.
+                // In this case, we check in the cache to see if the map is here and trigger the event manually.
+                if (this.cache.tilemap.exists(this.MapUrlFile)) {
+                    const data = this.cache.tilemap.get(this.MapUrlFile);
+                    this.onMapLoad(data);
+                }
                 return;
             }
 
@@ -432,7 +433,7 @@ export class GameScene extends DirtyScene {
 
         gameManager.gameSceneIsCreated(this);
         urlManager.pushRoomIdToUrl(this.room);
-        analyticsClient.enteredRoom(this.room.id);
+        analyticsClient.enteredRoom(this.room.id, this.room.group);
         contactPageStore.set(this.room.contactPage);
 
         if (touchScreenManager.supportTouchScreen) {
@@ -584,8 +585,6 @@ export class GameScene extends DirtyScene {
             this.outlinedItem?.activate();
         });
 
-        this.openChatIcon = new OpenChatIcon(this, 2, this.game.renderer.height - 2);
-
         this.reposition();
 
         // From now, this game scene will be notified of reposition events
@@ -616,10 +615,6 @@ export class GameScene extends DirtyScene {
                 });
             }
             oldPeerNumber = newPeerNumber;
-        });
-
-        this.chatVisibilityUnsubscribe = chatVisibilityStore.subscribe((v) => {
-            this.openChatIcon.setVisible(!v);
         });
 
         this.emoteUnsubscribe = emoteStore.subscribe((emoteKey) => {
@@ -1085,6 +1080,58 @@ ${escapedMessage}
             })
         );
 
+        iframeListener.registerAnswerer("openCoWebsite", async (openCoWebsite, source) => {
+            if (!source) {
+                throw new Error("Unknown query source");
+            }
+
+            const coWebsite = await coWebsiteManager.loadCoWebsite(
+                openCoWebsite.url,
+                iframeListener.getBaseUrlFromSource(source),
+                openCoWebsite.allowApi,
+                openCoWebsite.allowPolicy,
+                openCoWebsite.position
+            );
+
+            if (!coWebsite) {
+                throw new Error("Error on opening co-website");
+            }
+
+            return {
+                id: coWebsite.iframe.id,
+                position: coWebsite.position,
+            };
+        });
+
+        iframeListener.registerAnswerer("getCoWebsites", () => {
+            const coWebsites = coWebsiteManager.getCoWebsites();
+
+            return coWebsites.map((coWebsite: CoWebsite) => {
+                return {
+                    id: coWebsite.iframe.id,
+                    position: coWebsite.position,
+                };
+            });
+        });
+
+        iframeListener.registerAnswerer("closeCoWebsite", async (coWebsiteId) => {
+            const coWebsite = coWebsiteManager.getCoWebsiteById(coWebsiteId);
+
+            if (!coWebsite) {
+                throw new Error("Unknown co-website");
+            }
+
+            return coWebsiteManager.closeCoWebsite(coWebsite).catch((error) => {
+                throw new Error("Error on closing co-website");
+            });
+        });
+
+        iframeListener.registerAnswerer("closeCoWebsites", async () => {
+            return await coWebsiteManager.closeCoWebsites().catch((error) => {
+                throw new Error("Error on closing all co-websites");
+            });
+        });
+
         iframeListener.registerAnswerer("getMapData", () => {
             return {
                 data: this.gameMap.getMap(),
@@ -1195,27 +1242,6 @@ ${escapedMessage}
         iframeListener.registerAnswerer("removeActionMessage", (message) => {
             layoutManagerActionStore.removeAction(message.uuid);
         });
-
-        this.iframeSubscriptionList.push(
-            iframeListener.modifyEmbeddedWebsiteStream.subscribe((embeddedWebsite) => {
-                // TODO
-                // TODO
-                // TODO
-                // TODO
-                // TODO
-                // TODO
-                // TODO
-                // TODO
-                // TODO
-                // TODO
-                // TODO
-                // TODO
-                // TODO
-                // TODO
-                // TODO
-                // TODO
-            })
-        );
     }
 
     private setPropertyLayer(
@@ -1309,7 +1335,7 @@ ${escapedMessage}
 
     public cleanupClosingScene(): void {
         // stop playing audio, close any open website, stop any open Jitsi
-        coWebsiteManager.closeCoWebsite();
+        coWebsiteManager.closeCoWebsites();
         // Stop the script, if any
         const scripts = this.getScriptUrls(this.mapFile);
         for (const script of scripts) {
@@ -1327,7 +1353,6 @@ ${escapedMessage}
         this.pinchManager?.destroy();
         this.emoteManager.destroy();
         this.peerStoreUnsubscribe();
-        this.chatVisibilityUnsubscribe();
         this.emoteUnsubscribe();
         this.emoteMenuUnsubscribe();
         this.biggestAvailableAreaStoreUnsubscribe();
@@ -1336,6 +1361,8 @@ ${escapedMessage}
         iframeListener.unregisterAnswerer("getMapData");
         iframeListener.unregisterAnswerer("triggerActionMessage");
         iframeListener.unregisterAnswerer("removeActionMessage");
+        iframeListener.unregisterAnswerer("openCoWebsite");
+        iframeListener.unregisterAnswerer("getCoWebsites");
         this.sharedVariablesManager?.close();
         this.embeddedWebsiteManager?.close();
 
@@ -1802,8 +1829,6 @@ ${escapedMessage}
         return undefined;
     }
     private reposition(): void {
-        this.openChatIcon.setY(this.game.renderer.height - 2);
-
         // Recompute camera offset if needed
         biggestAvailableAreaStore.recompute();
     }
