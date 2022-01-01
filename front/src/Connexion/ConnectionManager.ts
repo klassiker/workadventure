@@ -84,7 +84,8 @@ class ConnectionManager {
         if (token) {
             this.authToken = token;
             localUserStore.setAuthToken(token);
-            //token was saved, clear url
+
+            //clean token of url
             urlParams.delete("token");
         }
 
@@ -95,8 +96,6 @@ class ConnectionManager {
             }
             urlManager.pushRoomIdToUrl(this._currentRoom);
         } else if (connexionType === GameConnexionTypes.jwt) {
-            const urlParams = new URLSearchParams(window.location.search);
-
             if (!token) {
                 const code = urlParams.get("code");
                 const state = urlParams.get("state");
@@ -133,13 +132,14 @@ class ConnectionManager {
 
             const roomUrl = data.roomUrl;
 
+            const query = urlParams.toString();
             this._currentRoom = await Room.createRoom(
                 new URL(
                     window.location.protocol +
                         "//" +
                         window.location.host +
                         roomUrl +
-                        window.location.search +
+                        (query ? "?" + query : "") + //use urlParams because the token param must be deleted
                         window.location.hash
                 )
             );
@@ -164,12 +164,13 @@ class ConnectionManager {
                     console.error(err);
                 }
             } else {
+                const query = urlParams.toString();
                 roomPath =
                     window.location.protocol +
                     "//" +
                     window.location.host +
                     window.location.pathname +
-                    window.location.search +
+                    (query ? "?" + query : "") + //use urlParams because the token param must be deleted
                     window.location.hash;
             }
 
@@ -177,8 +178,9 @@ class ConnectionManager {
             //before set token of user we must load room and all information. For example the mandatory authentication could be require on current room
             this._currentRoom = await Room.createRoom(new URL(roomPath));
 
-            //defined last room url this room path
-            localUserStore.setLastRoomUrl(this._currentRoom.key);
+            //Set last room visited! (connected or nor, must to be saved in localstorage and cache API)
+            //use href to keep # value
+            localUserStore.setLastRoomUrl(this._currentRoom.href);
 
             //todo: add here some kind of warning if authToken has expired.
             if (!this.authToken && !this._currentRoom.authenticationMandatory) {
@@ -189,8 +191,15 @@ class ConnectionManager {
                     analyticsClient.loggedWithSso();
                 } catch (err) {
                     console.error(err);
-                    this.loadOpenIDScreen();
-                    return Promise.reject(new Error("You will be redirect on login page"));
+                    //if user must to be connect in current room or pusher error is not openid provier access error
+                    //try to connected with function loadOpenIDScreen
+                    if (
+                        this._currentRoom.authenticationMandatory ||
+                        (err.response?.data && err.response.data !== "User cannot to be connected on openid provier")
+                    ) {
+                        this.loadOpenIDScreen();
+                        return Promise.reject(new Error("You will be redirect on login page"));
+                    }
                 }
             }
             this.localUser = localUserStore.getLocalUser() as LocalUser; //if authToken exist in localStorage then localUser cannot be null
@@ -218,8 +227,6 @@ class ConnectionManager {
             analyticsClient.identifyUser(this.localUser.uuid, this.localUser.email);
         }
 
-        //clean history with new URL
-        window.history.pushState({}, document.title, window.location.pathname);
         this.serviceWorker = new _ServiceWorker();
         return Promise.resolve(this._currentRoom);
     }
