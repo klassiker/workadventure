@@ -22,8 +22,8 @@ const nonce = "nonce";
 const notification = "notificationPermission";
 const code = "code";
 const cameraSetup = "cameraSetup";
-
 const cacheAPIIndex = "workavdenture-cache";
+const userProperties = "user-properties";
 
 let localStorage = window.localStorage;
 
@@ -146,13 +146,16 @@ class LocalUserStore {
         return localStorage.getItem(ignoreFollowRequests) === "true";
     }
 
-    setLastRoomUrl(roomUrl: string): void {
+    async setLastRoomUrl(roomUrl: string): Promise<void> {
         localStorage.setItem(lastRoomUrl, roomUrl.toString());
         if ("caches" in window) {
-            caches.open(cacheAPIIndex).then((cache) => {
+            try {
+                const cache = await caches.open(cacheAPIIndex);
                 const stringResponse = new Response(JSON.stringify({ roomUrl }));
-                cache.put(`/${lastRoomUrl}`, stringResponse);
-            });
+                await cache.put(`/${lastRoomUrl}`, stringResponse);
+            } catch (e) {
+                console.error("Could not store last room url in Browser cache. Are you using private browser mode?", e);
+            }
         }
     }
     getLastRoomUrl(): string {
@@ -229,6 +232,27 @@ class LocalUserStore {
     getCameraSetup(): { video: unknown; audio: unknown } | undefined {
         const cameraSetupValues = localStorage.getItem(cameraSetup);
         return cameraSetupValues != undefined ? JSON.parse(cameraSetupValues) : undefined;
+    }
+
+    getAllUserProperties(): Map<string, unknown> {
+        const result = new Map<string, string>();
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key) {
+                if (key.startsWith(userProperties + "_")) {
+                    const value = localStorage.getItem(key);
+                    if (value) {
+                        const userKey = key.substr((userProperties + "_").length);
+                        result.set(userKey, JSON.parse(value));
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    setUserProperty(name: string, value: unknown): void {
+        localStorage.setItem(userProperties + "_" + name, JSON.stringify(value));
     }
 }
 
