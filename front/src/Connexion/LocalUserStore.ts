@@ -152,7 +152,7 @@ class LocalUserStore {
             try {
                 const cache = await caches.open(cacheAPIIndex);
                 const stringResponse = new Response(JSON.stringify({ roomUrl }));
-                await cache.put(`/${lastRoomUrl}`, stringResponse);
+                //await cache.put(`/${lastRoomUrl}`, stringResponse);
             } catch (e) {
                 console.error("Could not store last room url in Browser cache. Are you using private browser mode?", e);
             }
