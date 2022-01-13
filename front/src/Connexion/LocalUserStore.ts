@@ -25,7 +25,17 @@ const cameraSetup = "cameraSetup";
 
 const cacheAPIIndex = "workavdenture-cache";
 
+let localStorage = window.localStorage;
+
 class LocalUserStore {
+    saveConsent(consent: boolean) {
+        window.localStorage.setItem("_consent", JSON.stringify(consent));
+    }
+    getConsent(): boolean {
+        const data = window.localStorage.getItem("_consent");
+        return data ? JSON.parse(data) : true;
+    }
+
     saveUser(localUser: LocalUser) {
         localStorage.setItem("localUser", JSON.stringify(localUser));
     }
@@ -223,3 +233,10 @@ class LocalUserStore {
 }
 
 export const localUserStore = new LocalUserStore();
+
+if (localUserStore.getConsent()) {
+    console.log("Using localStorage");
+} else {
+    console.log("Using sessionStorage");
+    localStorage = window.sessionStorage;
+}

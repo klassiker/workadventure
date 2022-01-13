@@ -5,6 +5,7 @@
     import { isMobile } from "../../Enum/EnvironmentVariable";
     import { menuVisiblilityStore } from "../../Stores/MenuStore";
 
+    let consent: boolean = localUserStore.getConsent();
     let fullscreen: boolean = localUserStore.getFullscreen();
     let notification: boolean = localUserStore.getNotification() === "granted";
     let forceCowebsiteTrigger: boolean = localUserStore.getForceCowebsiteTrigger();
@@ -13,6 +14,17 @@
     let valueVideo: number = localUserStore.getVideoQualityValue();
     let previewValueGame = valueGame;
     let previewValueVideo = valueVideo;
+
+    function changeConsent() {
+        if (!consent) {
+            console.log("localStorage disabled");
+            window.localStorage.clear();
+        } else {
+            console.log("localStorage enabled");
+        }
+
+        localUserStore.saveConsent(consent);
+    }
 
     function saveSetting() {
         if (valueGame !== previewValueGame) {
@@ -136,6 +148,15 @@
                 on:change={changeIgnoreFollowRequests}
             />
             <span>Ignore requests to follow other users</span>
+        </label>
+        <label>
+            <input
+                type="checkbox"
+                class="nes-checkbox is-dark"
+                bind:checked={consent}
+                on:change={changeConsent}
+            />
+            <span>Enable LocalStorage</span>
         </label>
     </section>
 </div>
