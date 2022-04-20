@@ -7,6 +7,7 @@ import type { PlayerAnimationDirections } from "../Player/Animation";
 import type { Unsubscriber } from "svelte/store";
 import type { ActivatableInterface } from "../Game/ActivatableInterface";
 import type CancelablePromise from "cancelable-promise";
+import LL from "../../i18n/i18n-svelte";
 
 /**
  * Class representing the sprite of a remote player (a player that plays on another computer)
@@ -31,18 +32,18 @@ export class RemotePlayer extends Character implements ActivatableInterface {
         moving: boolean,
         visitCardUrl: string | null,
         companion: string | null,
-        companionTexturePromise?: Promise<string>,
+        companionTexturePromise?: CancelablePromise<string>,
         activationRadius?: number
     ) {
         super(Scene, x, y, texturesPromise, name, direction, moving, 1, true, companion, companionTexturePromise);
 
         //set data
         this.userId = userId;
+        this.visitCardUrl = visitCardUrl;
         this.registeredActions = [];
         this.registerDefaultActionsMenuActions();
         this.setClickable(this.registeredActions.length > 0);
         this.activationRadius = activationRadius ?? 96;
-        this.visitCardUrl = visitCardUrl;
         this.actionsMenuStoreUnsubscriber = actionsMenuStore.subscribe((value: ActionsMenuData | undefined) => {
             this.isActionsMenuInitialized = value ? true : false;
         });
@@ -107,7 +108,7 @@ export class RemotePlayer extends Character implements ActivatableInterface {
     private registerDefaultActionsMenuActions(): void {
         if (this.visitCardUrl) {
             this.registeredActions.push({
-                actionName: "Visiting Card",
+                actionName: LL.woka.menu.businessCard(),
                 callback: () => {
                     requestVisitCardsStore.set(this.visitCardUrl);
                     actionsMenuStore.clear();
@@ -118,7 +119,7 @@ export class RemotePlayer extends Character implements ActivatableInterface {
 
     private bindEventHandlers(): void {
         this.on(Phaser.Input.Events.POINTER_DOWN, (event: Phaser.Input.Pointer) => {
-            if (event.downElement.nodeName === "CANVAS") {
+            if (event.downElement.nodeName === "CANVAS" && event.leftButtonDown()) {
                 this.toggleActionsMenu();
             }
         });
