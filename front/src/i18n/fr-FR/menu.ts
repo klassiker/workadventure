@@ -63,6 +63,7 @@ const menu: NonNullable<Translation["menu"]> = {
                 "Quand l'onglet WorkAdventure de votre navigateur n'est pas visible, WorkAdventure passe en \"mode absent\"",
             cameraToggle: 'Garder la caméra activée en "mode absent"',
             microphoneToggle: 'Garder le microphone activé en "mode absent"',
+            localStorage: "Enable LocalStorage",
         },
         save: {
             warning: "(La sauvegarde de ces paramètres redémarre le jeu)",

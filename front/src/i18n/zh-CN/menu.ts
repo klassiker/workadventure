@@ -63,6 +63,7 @@ const menu: NonNullable<Translation["menu"]> = {
                 '当WorkAdventure标签页在后台时, 会切换到"离开模式"。在该模式中，你可以选择自动禁用摄像头 和/或 麦克风 直到标签页显示。',
             cameraToggle: "摄像头",
             microphoneToggle: "麦克风",
+            localStorage: "Enable LocalStorage",
         },
         save: {
             warning: "(保存这些设置会重新加载游戏)",

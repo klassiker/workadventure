@@ -63,6 +63,7 @@ const menu: NonNullable<Translation["menu"]> = {
                 'While the WorkAdventure tab in your browser is not visible. WorkAdventure switches in "away mode.', //TODO: translate
             cameraToggle: "Keep camera active in away mode", //TODO: translate
             microphoneToggle: "Keep camera active in away mode", //TODO: translate
+            localStorage: "LocalStorage aktivieren",
         },
         save: {
             warning: "(Das Spiel wird nach dem Speichern neugestartet)",

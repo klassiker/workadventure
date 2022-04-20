@@ -63,6 +63,7 @@ const menu: BaseTranslation = {
                 'While the WorkAdventure tab in your browser is not visible. WorkAdventure switches to "away mode"',
             cameraToggle: 'Keep camera active in "away mode"',
             microphoneToggle: 'Keep microphone active in "away mode"',
+            localStorage: "Enable LocalStorage",
         },
         save: {
             warning: "(Saving these settings will restart the game)",

@@ -269,7 +269,7 @@
                 bind:checked={consent}
                 on:change={changeConsent}
             />
-            <span>Enable LocalStorage</span>
+            <span>{$LL.menu.settings.privacySettings.localStorage()}</span>
         </label>
     </section>
 </div>
