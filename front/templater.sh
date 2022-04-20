@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -x
 set -o nounset errexit
-index_file=/usr/share/nginx/html/index.html
+index_file=dist/index.html
 tmp_trackcodefile=/tmp/trackcode
 
 # To inject tracking code, you have two choices:
