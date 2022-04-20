@@ -9,6 +9,8 @@ export enum WaScaleManagerEvent {
     RefreshFocusOnTarget = "wa-scale-manager:refresh-focus-on-target",
 }
 
+export type WaScaleManagerFocusTarget = { x: number; y: number; width?: number; height?: number };
+
 export class WaScaleManager {
     private hdpiManager: HdpiManager;
     private scaleManager!: ScaleManager;
@@ -16,7 +18,7 @@ export class WaScaleManager {
     private actualZoom: number = 1;
     private _saveZoom: number = 1;
 
-    private focusTarget?: { x: number; y: number; width: number; height: number };
+    private focusTarget?: WaScaleManagerFocusTarget;
 
     public constructor(private minGamePixelsNumber: number, private absoluteMinPixelNumber: number) {
         this.hdpiManager = new HdpiManager(minGamePixelsNumber, absoluteMinPixelNumber);
@@ -35,19 +37,17 @@ export class WaScaleManager {
             height: height * devicePixelRatio,
         });
 
-        if (gameSize.width == 0) {
-            return;
+        if (realSize.width !== 0 && gameSize.width !== 0 && devicePixelRatio !== 0) {
+            this.actualZoom = realSize.width / gameSize.width / devicePixelRatio;
         }
 
-        this.actualZoom = realSize.width / gameSize.width / devicePixelRatio;
-
-        this.scaleManager.setZoom(realSize.width / gameSize.width / devicePixelRatio);
         this.scaleManager.resize(gameSize.width, gameSize.height);
+        this.scaleManager.setZoom(this.actualZoom);
 
         // Override bug in canvas resizing in Phaser. Let's resize the canvas ourselves
         const style = this.scaleManager.canvas.style;
-        style.width = Math.ceil(realSize.width / devicePixelRatio) + "px";
-        style.height = Math.ceil(realSize.height / devicePixelRatio) + "px";
+        style.width = Math.ceil(realSize.width !== 0 ? realSize.width / devicePixelRatio : 0) + "px";
+        style.height = Math.ceil(realSize.height !== 0 ? realSize.height / devicePixelRatio : 0) + "px";
 
         // Resize the game element at the same size at the canvas
         const gameStyle = HtmlUtils.getElementByIdOrFail<HTMLDivElement>("game").style;
@@ -72,11 +72,13 @@ export class WaScaleManager {
         if (!this.focusTarget) {
             return;
         }
-        this.zoomModifier = this.getTargetZoomModifierFor(this.focusTarget.width, this.focusTarget.height);
+        if (this.focusTarget.width && this.focusTarget.height) {
+            this.zoomModifier = this.getTargetZoomModifierFor(this.focusTarget.width, this.focusTarget.height);
+        }
         this.game.events.emit(WaScaleManagerEvent.RefreshFocusOnTarget, this.focusTarget);
     }
 
-    public setFocusTarget(targetDimensions?: { x: number; y: number; width: number; height: number }): void {
+    public setFocusTarget(targetDimensions?: WaScaleManagerFocusTarget): void {
         this.focusTarget = targetDimensions;
     }
 
@@ -109,7 +111,7 @@ export class WaScaleManager {
         }
     }
 
-    public getFocusTarget(): { x: number; y: number; width: number; height: number } | undefined {
+    public getFocusTarget(): WaScaleManagerFocusTarget | undefined {
         return this.focusTarget;
     }
 
